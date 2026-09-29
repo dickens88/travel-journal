@@ -1,13 +1,15 @@
 import * as Clipboard from 'expo-clipboard';
-import { useState, type ComponentProps } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BUDDY_PROMPT } from '@/ai/chat';
 import { CLAUDE_MODELS, claudeBase, claudeEffort, DEFAULT_MODEL, describeError, getBackend } from '@/ai/client';
 import { chatCompletion } from '@/ai/openai';
-import { Button, Card, Display, Segmented } from '@/components/common/ui';
+import { AVATAR_PRESETS, BuddyAvatar } from '@/components/buddy/BuddyAvatar';
+import { Button, Card, Display, Icon, Segmented } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
+import { avatarPhotoFile, deleteAvatarPhoto, pickAvatarPhoto } from '@/settings/avatar';
 import { saveSettings, useSettings, useSettingsReady, type Provider, type Settings } from '@/settings/settings';
 
 // Most MaaS models are served on /v2; the few that aren't (e.g. qwen2.5-vl-72b on /v1) get their own vision Base URL
@@ -31,6 +33,7 @@ function SettingsForm() {
       <ScrollView style={{ backgroundColor: Colors.paper }} contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100, paddingHorizontal: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
         <Display variant="hero" marker>设置</Display>
         <ModelCard />
+        <AvatarCard />
         <PromptCard />
         <Card style={styles.row}>
           <View style={{ flex: 1 }}>
@@ -266,6 +269,76 @@ function ClaudeModelPicker({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
+function AvatarTile({ on, label, onPress, children }: { on: boolean; label: string; onPress: () => void; children: ReactNode }) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.tile, pressed && { opacity: 0.6 }]}>
+      <View style={[styles.tileRing, on && { borderColor: Colors.teal }]}>{children}</View>
+      <Text style={[styles.hint, on && { color: Colors.teal, fontWeight: '600' }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function AvatarCard() {
+  const { buddyAvatar } = useSettings();
+  const [uploading, setUploading] = useState(false);
+  const photo = avatarPhotoFile(buddyAvatar);
+
+  // Only one uploaded picture is kept; switching away from it removes the file
+  const choose = async (value: string) => {
+    if (value === buddyAvatar) return;
+    await saveSettings({ buddyAvatar: value });
+    deleteAvatarPhoto(buddyAvatar);
+  };
+
+  const upload = async () => {
+    setUploading(true);
+    try {
+      const value = await pickAvatarPhoto();
+      if (value) await choose(value);
+    } catch (e) {
+      Alert.alert('头像没能换成', e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Card style={{ gap: 12 }}>
+      <View style={styles.row}>
+        <BuddyAvatar value={buddyAvatar} size={48} />
+        <View style={{ flex: 1 }}>
+          <Display variant="subheading">搭子头像</Display>
+          <Text style={styles.hint}>挑一只小动物，或者上传一张自己喜欢的图</Text>
+        </View>
+      </View>
+      <View style={styles.tiles}>
+        <AvatarTile on={!buddyAvatar} label="默认" onPress={() => choose('')}>
+          <BuddyAvatar value="" size={52} />
+        </AvatarTile>
+        {AVATAR_PRESETS.map((p) => (
+          <AvatarTile key={p.id} on={buddyAvatar === p.id} label={p.label} onPress={() => choose(p.id)}>
+            <BuddyAvatar value={p.id} size={52} />
+          </AvatarTile>
+        ))}
+        <AvatarTile on={!!photo} label={uploading ? '处理中…' : photo ? '换一张' : '上传'} onPress={() => !uploading && upload()}>
+          {photo ? (
+            <BuddyAvatar value={buddyAvatar} size={52} />
+          ) : (
+            <View style={styles.upload}>
+              <Icon name="addPhoto" size={24} />
+            </View>
+          )}
+        </AvatarTile>
+      </View>
+    </Card>
+  );
+}
+
 function PromptCard() {
   const settings = useSettings();
   const saved = settings.buddyPrompt || BUDDY_PROMPT;
@@ -317,5 +390,9 @@ const styles = StyleSheet.create({
   optionOn: { borderColor: Colors.teal, backgroundColor: Colors.tealSoft },
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: Colors.line },
   radioOn: { borderColor: Colors.teal, borderWidth: 6 },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 12 },
+  tile: { width: '25%', alignItems: 'center', gap: 4 },
+  tileRing: { padding: 2, borderRadius: 30, borderWidth: 2.5, borderColor: 'transparent' },
+  upload: { width: 52, height: 52, borderRadius: 26, borderWidth: 1.5, borderStyle: 'dashed', borderColor: Colors.line, backgroundColor: Colors.paper, alignItems: 'center', justifyContent: 'center' },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 });

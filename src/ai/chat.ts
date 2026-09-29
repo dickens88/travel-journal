@@ -10,6 +10,7 @@ import { addChatMessage, addNote, getTrip, listChat, listDays, listNotes, listPh
 import type { ChatRow, Photo, Trip } from '@/db/types';
 import { loadSettings } from '@/settings/settings';
 import { photoAnalysis, stopsFromPhotos } from '@/trip/derive';
+import { stripMarkdown } from '@/utils/markdown';
 import { localParts } from '@/utils/time';
 
 // Default buddy persona; the user can replace it in Settings. The trip material is appended after it either way.
@@ -267,5 +268,6 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
 
 export function speak(text: string) {
   Speech.stop();
-  Speech.speak(text, { language: 'zh-CN' });
+  // Replies are markdown; don't read the symbols aloud
+  Speech.speak(stripMarkdown(text), { language: 'zh-CN' });
 }

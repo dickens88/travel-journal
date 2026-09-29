@@ -3,10 +3,15 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { buddySkills, resolveSpot, skillPrompt, STORY_PROMPT, type BuddySkill } from '@/ai/buddySkills';
 import { retryBuddyMessage, sendBuddyMessage, speak } from '@/ai/chat';
 import { blocksOf, isToolResultTurn, isUserTurn, photoIdsOf, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import { describeError } from '@/ai/client';
+import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
+import { SkillGrid, SkillStrip } from '@/components/buddy/Skills';
+import { Dots, TypingDots } from '@/components/buddy/TypingDots';
 import { ErrorNotice } from '@/components/common/ErrorNotice';
+import { Markdown } from '@/components/common/Markdown';
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Button, Chip, Display, Icon } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
@@ -42,7 +47,7 @@ const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map
       {text ? (
         <>
           <View style={styles.botBubble}>
-            <Text style={styles.botText}>{text}</Text>
+            <Markdown text={text} style={styles.botText} />
           </View>
           <Pressable style={styles.speak} onPress={() => speak(text)} accessibilityLabel="朗读这条回复">
             <Icon name="speaker" size={13} color={Colors.muted} />
@@ -78,11 +83,20 @@ export default function BuddySheet() {
   const autoAsked = useRef(false);
   // Decided once: `ask` is cleared after the auto-send, which must not then pop the keyboard
   const [focusInput] = useState(() => !!photo && ask !== 'describe');
-  const [picking, setPicking] = useState(false);
+  // attach: the picked photo waits for a question; story: picking it asks for its story right away
+  const [picking, setPicking] = useState<'attach' | 'story' | null>(null);
   const [streaming, setStreaming] = useState<string | null>(null);
+  // Locating the user before a place-based skill can send
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
   const scroll = useRef<ScrollView>(null);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
+  const skills = useMemo(() => (trip ? buddySkills(trip, photos) : []), [trip, photos]);
+  const ready = settingsReady && aiConfigured(settings);
+  const busy = streaming !== null || locating;
+  // A fresh chat opens on the skill menu instead of an empty list; once it has started, a strip stays above an empty input
+  const showGrid = ready && !busy && rows.length === 0;
+  const showStrip = ready && !busy && rows.length > 0 && !input.trim();
 
   // Runs one exchange; on failure, retry answers the saved question again, or resends it if it never got saved
   const exchange = async (job: () => Promise<void>, resend: () => void) => {
@@ -101,11 +115,27 @@ export default function BuddySheet() {
 
   const send = async (preset?: string, attach = photoId) => {
     const text = (preset ?? input).trim();
-    if (!text || streaming !== null) return;
+    if (!text || busy) return;
     if (preset === undefined) setInput('');
     setPhotoId(null);
-    setPicking(false);
+    setPicking(null);
     await exchange(() => sendBuddyMessage(id, text, attach, setStreaming), () => send(text, attach));
+  };
+
+  const tellStory = (p: Photo) => send(STORY_PROMPT, p.id);
+
+  const runSkill = async (skill: BuddySkill) => {
+    if (!trip || busy) return;
+    if (skill.needs === 'photo') {
+      setPicking((v) => (v === 'story' ? null : 'story'));
+      return;
+    }
+    let spot = null;
+    if (skill.needs === 'place') {
+      setLocating(true);
+      spot = await resolveSpot(trip, photos).finally(() => setLocating(false));
+    }
+    send(skillPrompt(skill.id, { trip, photos, spot }), null);
   };
 
   useEffect(() => {
@@ -133,9 +163,7 @@ export default function BuddySheet() {
   return (
     <KeyboardAvoidingView style={styles.sheet} behavior="padding">
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.avatar}>
-          <Icon name="buddy" size={26} color={Colors.ink} />
-        </View>
+        <BuddyAvatar value={settings.buddyAvatar} size={42} />
         <View style={{ flex: 1 }}>
           <Display variant="subheading">旅行搭子</Display>
           <Text style={styles.sub} numberOfLines={1}>对话会保存在「{trip?.title}」里</Text>
@@ -150,7 +178,7 @@ export default function BuddySheet() {
           <Icon name="collapse" size={22} duo={null} />
         </Pressable>
       </View>
-      <ScrollView ref={scroll} contentContainerStyle={styles.list} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
+      <ScrollView ref={scroll} contentContainerStyle={styles.list} onContentSizeChange={() => !showGrid && scroll.current?.scrollToEnd({ animated: true })}>
         <View style={styles.context}>
           <Icon name="sparkle" size={14} color="#4A433B" />
           <Text style={{ fontSize: 12, color: '#4A433B' }}>已了解 {photos.length} 张照片 · {noteCount} 条随手记</Text>
@@ -161,31 +189,50 @@ export default function BuddySheet() {
             <Button compact label="去设置" onPress={() => router.push('/settings')} />
           </View>
         ) : null}
+        {showGrid ? <SkillGrid skills={skills} photos={photos} onSkill={runSkill} onStory={tellStory} /> : null}
         {rows.map((r) => (
           <View key={r.id} style={{ gap: 12 }}>
             {dividers.has(r.id) ? <Text style={styles.day}>{dividers.get(r.id)}</Text> : null}
             <Bubble row={r} photos={photoMap} />
           </View>
         ))}
-        {streaming !== null ? (
-          <View style={[styles.botBubble, { alignSelf: 'flex-start', maxWidth: '88%' }]}>
-            <Text style={styles.botText}>{streaming || '想一想…'}</Text>
+        {locating || streaming === '' ? (
+          <View style={[styles.botBubble, { alignSelf: 'flex-start' }]}>
+            <TypingDots label={locating ? '先看看你在哪儿…' : undefined} />
+          </View>
+        ) : streaming ? (
+          <View style={[styles.botBubble, { alignSelf: 'flex-start', maxWidth: '88%', gap: 8 }]}>
+            <Markdown text={streaming} style={styles.botText} />
+            {/* Still working: replies can stall mid-way while the model searches */}
+            <Dots size={5} />
           </View>
         ) : null}
         {error && streaming === null ? <ErrorNotice title="搭子没能回复" message={error.message} onRetry={error.retry} onDismiss={() => setError(null)} /> : null}
       </ScrollView>
       {picking ? (
-        <ScrollView horizontal style={styles.picker} contentContainerStyle={{ gap: 6, padding: 8 }}>
-          {[...photos].reverse().map((p) => (
-            <Pressable key={p.id} onPress={() => { setPhotoId(p.id); setPicking(false); }}>
-              <PhotoThumb file={p.file} style={styles.pickThumb} />
-            </Pressable>
-          ))}
-          {photos.length === 0 ? <Text style={styles.sub}>这趟旅行还没有照片</Text> : null}
-        </ScrollView>
+        <View style={styles.picker}>
+          {picking === 'story' ? (
+            <View style={styles.pickHead}>
+              <Text style={styles.pickHint}>选一张照片，搭子给你讲讲它背后的故事</Text>
+              <Pressable onPress={() => setPicking(null)} hitSlop={10} accessibilityLabel="取消">
+                <Icon name="close" size={16} color={Colors.muted} duo={null} />
+              </Pressable>
+            </View>
+          ) : null}
+          <ScrollView horizontal contentContainerStyle={{ gap: 6, padding: 8 }}>
+            {[...photos].reverse().map((p) => (
+              <Pressable key={p.id} onPress={() => (picking === 'story' ? tellStory(p) : (setPhotoId(p.id), setPicking(null)))}>
+                <PhotoThumb file={p.file} style={styles.pickThumb} />
+              </Pressable>
+            ))}
+            {photos.length === 0 ? <Text style={styles.sub}>这趟旅行还没有照片</Text> : null}
+          </ScrollView>
+        </View>
+      ) : showStrip ? (
+        <SkillStrip skills={skills} onSkill={runSkill} />
       ) : null}
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-        <Pressable onPress={() => setPicking((v) => !v)} style={styles.attach} accessibilityLabel="附加这趟旅行里的照片">
+        <Pressable onPress={() => setPicking((v) => (v === 'attach' ? null : 'attach'))} style={styles.attach} accessibilityLabel="附加这趟旅行里的照片">
           {photoId && photoMap.get(photoId) ? (
             <PhotoThumb file={photoMap.get(photoId)!.file} style={{ width: 44, height: 44, borderRadius: 22 }} />
           ) : (
@@ -202,7 +249,7 @@ export default function BuddySheet() {
           multiline
           accessibilityLabel="向旅行搭子提问"
         />
-        <Pressable onPress={() => send()} style={[styles.send, (!input.trim() || streaming !== null) && { opacity: 0.4 }]} accessibilityLabel="发送">
+        <Pressable onPress={() => send()} style={[styles.send, (!input.trim() || busy) && { opacity: 0.4 }]} accessibilityLabel="发送">
           <Icon name="send" size={22} color={Colors.onDark} />
         </Pressable>
       </View>
@@ -213,7 +260,6 @@ export default function BuddySheet() {
 const styles = StyleSheet.create({
   sheet: { flex: 1, backgroundColor: Colors.paper },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 10, paddingLeft: 16, paddingRight: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.line },
-  avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: Colors.popSoft, alignItems: 'center', justifyContent: 'center' },
   headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   sub: { fontSize: 12, color: Colors.muted },
   list: { padding: 16, gap: 12 },
@@ -227,7 +273,9 @@ const styles = StyleSheet.create({
   botText: { fontSize: 15, lineHeight: 25, color: Colors.ink },
   speak: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   noteSaved: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 14, backgroundColor: Colors.accentSoft },
-  picker: { maxHeight: 88, backgroundColor: Colors.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.line },
+  picker: { backgroundColor: Colors.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.line },
+  pickHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
+  pickHint: { flex: 1, fontSize: 12, color: Colors.muted },
   pickThumb: { width: 72, height: 72, borderRadius: 8 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: Colors.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.line },
   attach: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.chip, alignItems: 'center', justifyContent: 'center' },

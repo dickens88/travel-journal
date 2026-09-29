@@ -23,6 +23,8 @@ export type Settings = {
   openaiVisionBaseURL: string;
   // Buddy system prompt; empty means the built-in default
   buddyPrompt: string;
+  // Buddy avatar: empty for the default icon, a preset animal id, or `photo:<file>` for an uploaded picture
+  buddyAvatar: string;
   tts: boolean;
 };
 
@@ -39,7 +41,7 @@ const SECURE = {
   openaiVisionBaseURL: 'openai_vision_base_url',
   tts: 'tts_enabled',
 } as const;
-const PLAIN = { buddyPrompt: 'buddy_prompt' } as const;
+const PLAIN = { buddyPrompt: 'buddy_prompt', buddyAvatar: 'buddy_avatar' } as const;
 
 function readPref(key: string) {
   try {
@@ -61,6 +63,7 @@ let current: Settings = {
   openaiVisionModel: '',
   openaiVisionBaseURL: '',
   buddyPrompt: '',
+  buddyAvatar: '',
   tts: true,
 };
 let loaded: Promise<void> | null = null;
@@ -85,6 +88,7 @@ export async function loadSettings(): Promise<Settings> {
       ...v,
       provider: v.provider === 'openai' ? 'openai' : 'anthropic',
       buddyPrompt: readPref(PLAIN.buddyPrompt),
+      buddyAvatar: readPref(PLAIN.buddyAvatar),
       tts: v.tts !== '0',
     };
     ready = true;
@@ -102,7 +106,9 @@ export async function saveSettings(patch: Partial<Settings>) {
       SecureStore.setItemAsync(SECURE[k], k === 'tts' ? (current.tts ? '1' : '0') : current[k]),
     ),
   );
-  db.runSync('INSERT INTO prefs (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', PLAIN.buddyPrompt, current.buddyPrompt);
+  for (const k of Object.keys(PLAIN) as (keyof typeof PLAIN)[]) {
+    db.runSync('INSERT INTO prefs (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', PLAIN[k], current[k]);
+  }
   changed.notify();
 }
 

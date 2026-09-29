@@ -1,6 +1,7 @@
 import { blocksOf, isUserTurn, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import type { ChatRow, Note, Photo } from '@/db/types';
 import { photoPlace } from '@/photos/describe';
+import { stripMarkdown } from '@/utils/markdown';
 import { localParts } from '@/utils/time';
 
 export type FeedItem =
@@ -71,7 +72,7 @@ export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): Fee
       firstRowId: session[0].id,
       turns: userTurns.length,
       question: textOf(firstUser),
-      answer: lastAnswer ? textOf(blocksOf(lastAnswer.content_json)) : '',
+      answer: lastAnswer ? stripMarkdown(textOf(blocksOf(lastAnswer.content_json))) : '',
       usedSearch: usedWebSearch(assistantBlocks),
       savedNotes: savedNoteTexts(assistantBlocks).length,
       photoId: firstUser.find((b) => b.type === 'trip_photo')?.photo_id ?? null,

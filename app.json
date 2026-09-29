@@ -2,7 +2,7 @@
   "expo": {
     "name": "旅迹",
     "slug": "travel-journal",
-    "version": "1.0.0",
+    "version": "0.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "traveljournal",
