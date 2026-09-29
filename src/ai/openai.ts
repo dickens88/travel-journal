@@ -14,7 +14,7 @@ export type OAMessage =
 export type OATool = { type: 'function'; function: { name: string; description: string; parameters: object } };
 
 export type OAConfig = { apiKey: string; baseURL: string };
-type Request = { model: string; messages: OAMessage[]; tools?: OATool[]; max_tokens: number };
+type Request = { model: string; messages: OAMessage[]; tools?: OATool[]; max_tokens: number; temperature?: number };
 type Result = { text: string; toolCalls: OAToolCall[]; finishReason: string | null };
 
 export class OpenAIError extends Error {
@@ -53,14 +53,29 @@ type Chunk = {
   }[];
 };
 
-// Streams the reply, calling onText with the accumulated text; tool call fragments are stitched by index
-export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text: string) => void): Promise<Result> {
+// Streams the reply, calling onText with the accumulated text; tool call fragments are stitched by index.
+// With timeoutMs, a reply that hasn't finished by then is aborted — some models occasionally never stop generating.
+export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text: string) => void, opts: { timeoutMs?: number } = {}): Promise<Result> {
+  const abort = new AbortController();
+  const timer = opts.timeoutMs ? setTimeout(() => abort.abort(), opts.timeoutMs) : null;
+  try {
+    return await streamCompletion(cfg, req, abort.signal, onText);
+  } catch (e) {
+    if (!abort.signal.aborted) throw e;
+    throw new OpenAIError(null, `模型 ${req.model} 超过 ${Math.round(opts.timeoutMs! / 1000)} 秒没有返回完整结果，已中止`);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function streamCompletion(cfg: OAConfig, req: Request, signal: AbortSignal, onText?: (text: string) => void): Promise<Result> {
   let res: Response;
   try {
     res = await fetch(`${cfg.baseURL.trim().replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({ ...req, stream: true }),
+      signal,
     });
   } catch (e) {
     throw new OpenAIError(null, e instanceof Error ? e.message : String(e));
@@ -98,6 +113,10 @@ export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text
     let buf = '';
     try {
       for (;;) {
+        if (signal.aborted) {
+          reader.cancel().catch(() => {});
+          throw new Error('aborted');
+        }
         const { done, value } = await reader.read();
         buf += done ? decoder.decode() : decoder.decode(value, { stream: true });
         const lines = buf.split('\n');

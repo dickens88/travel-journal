@@ -19,6 +19,8 @@ export type Settings = {
   openaiModel: string;
   // Model that can read images; empty means openaiModel does
   openaiVisionModel: string;
+  // Where the vision model is served; empty means openaiBaseURL. Huawei MaaS serves some models on /v1 and others on /v2
+  openaiVisionBaseURL: string;
   // Buddy system prompt; empty means the built-in default
   buddyPrompt: string;
   tts: boolean;
@@ -34,6 +36,7 @@ const SECURE = {
   openaiBaseURL: 'openai_base_url',
   openaiModel: 'openai_model',
   openaiVisionModel: 'openai_vision_model',
+  openaiVisionBaseURL: 'openai_vision_base_url',
   tts: 'tts_enabled',
 } as const;
 const PLAIN = { buddyPrompt: 'buddy_prompt' } as const;
@@ -56,6 +59,7 @@ let current: Settings = {
   openaiBaseURL: '',
   openaiModel: '',
   openaiVisionModel: '',
+  openaiVisionBaseURL: '',
   buddyPrompt: '',
   tts: true,
 };

@@ -10,11 +10,12 @@ import { Button, Card, Display, Segmented } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { saveSettings, useSettings, useSettingsReady, type Provider, type Settings } from '@/settings/settings';
 
-const MAAS_URL = 'https://api.modelarts-maas.com/openai/v1';
+// Most MaaS models are served on /v2; the few that aren't (e.g. qwen2.5-vl-72b on /v1) get their own vision Base URL
+const MAAS_URL = 'https://api.modelarts-maas.com/v2';
 const CLAUDE_KEYS_URL = 'https://platform.claude.com/settings/keys';
 
 type Status = { ok: boolean; text: string } | null;
-type ModelFields = Pick<Settings, 'provider' | 'apiKey' | 'baseURL' | 'anthropicModel' | 'openaiKey' | 'openaiBaseURL' | 'openaiModel' | 'openaiVisionModel'>;
+type ModelFields = Pick<Settings, 'provider' | 'apiKey' | 'baseURL' | 'anthropicModel' | 'openaiKey' | 'openaiBaseURL' | 'openaiModel' | 'openaiVisionModel' | 'openaiVisionBaseURL'>;
 
 export default function SettingsScreen() {
   // Secure store loads asynchronously; seed the form only once saved values arrive
@@ -107,6 +108,7 @@ function ModelCard() {
     openaiBaseURL: settings.openaiBaseURL,
     openaiModel: settings.openaiModel,
     openaiVisionModel: settings.openaiVisionModel,
+    openaiVisionBaseURL: settings.openaiVisionBaseURL,
   }));
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<Status>(null);
@@ -132,9 +134,9 @@ function ModelCard() {
         const res = await chatCompletion(backend.cfg, { model: backend.model, max_tokens: 256, messages: [{ role: 'user', content: '用一句中文打个招呼。' }] });
         reply = res.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() || String(res.finishReason);
         // Photo recognition and photo chats go to the vision model; a bad name there otherwise only shows up later
-        if (backend.visionModel !== backend.model) {
+        if (backend.visionModel !== backend.model || backend.visionCfg !== backend.cfg) {
           try {
-            await chatCompletion(backend.cfg, { model: backend.visionModel, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] });
+            await chatCompletion(backend.visionCfg, { model: backend.visionModel, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] });
           } catch (e) {
             setStatus({ ok: false, text: `模型 ${backend.model} 正常，看图模型 ${backend.visionModel} 出错：${describeError(e)}` });
             return;
@@ -182,8 +184,15 @@ function ModelCard() {
           <KeyField label="API Key" value={form.openaiKey} onChangeText={(openaiKey) => set({ openaiKey })} placeholder="sk-…" />
           <Field label="模型名" value={form.openaiModel} onChangeText={(openaiModel) => set({ openaiModel })} placeholder="如 deepseek-v3.1" />
           <Field label="看图模型（可选，留空则用上面的模型）" value={form.openaiVisionModel} onChangeText={(openaiVisionModel) => set({ openaiVisionModel })} placeholder="支持图片输入的模型名" />
+          <Field
+            label="看图模型 Base URL（可选，留空则用上面的地址）"
+            value={form.openaiVisionBaseURL}
+            onChangeText={(openaiVisionBaseURL) => set({ openaiVisionBaseURL })}
+            placeholder="如 https://api.modelarts-maas.com/v1"
+            keyboardType="url"
+          />
           <Text style={styles.hint}>
-            华为云 MaaS：在控制台「API Key 管理」创建 Key，模型名见各模型的「调用说明」。识别照片和带照片的对话会用看图模型，写游记用上面的模型。这个模式下搭子没有联网搜索。
+            华为云 MaaS：在控制台「API Key 管理」创建 Key，模型名见各模型的「调用说明」。识别照片和带照片的对话会用看图模型，写游记用上面的模型。部分模型（如 qwen2.5-vl-72b）只在 /v1 地址上可用，其他模型用 /v2，这时把看图模型的地址单独填成 /v1。这个模式下搭子没有联网搜索。
           </Text>
         </>
       ) : (

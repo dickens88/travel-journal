@@ -32,8 +32,8 @@ class MissingKeyError extends Error {}
 
 export type Backend =
   | { kind: 'anthropic'; client: Anthropic; model: string }
-  // `model` writes text; `visionModel` is used whenever images are sent
-  | { kind: 'openai'; cfg: OAConfig; model: string; visionModel: string };
+  // `model` on `cfg` writes text; `visionModel` on `visionCfg` is used whenever images are sent
+  | { kind: 'openai'; cfg: OAConfig; model: string; visionCfg: OAConfig; visionModel: string };
 
 export async function getBackend(): Promise<Backend> {
   const s = await loadSettings();
@@ -42,7 +42,9 @@ export async function getBackend(): Promise<Backend> {
       throw new MissingKeyError('请先在「设置」里填写 OpenAI 兼容接口的 Base URL、API Key 和模型名');
     }
     const model = s.openaiModel.trim();
-    return { kind: 'openai', cfg: { apiKey: s.openaiKey, baseURL: s.openaiBaseURL }, model, visionModel: s.openaiVisionModel.trim() || model };
+    const cfg = { apiKey: s.openaiKey, baseURL: s.openaiBaseURL };
+    const visionCfg = s.openaiVisionBaseURL.trim() ? { ...cfg, baseURL: s.openaiVisionBaseURL } : cfg;
+    return { kind: 'openai', cfg, model, visionCfg, visionModel: s.openaiVisionModel.trim() || model };
   }
   if (!s.apiKey) throw new MissingKeyError('请先在「设置」里填写 Claude API Key');
   return {

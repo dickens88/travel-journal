@@ -16,6 +16,11 @@ const PROMPT = `以上是一次旅行中的照片，每张前面标了照片 id�
 请逐张描述，用于之后写游记：场景（认得出的地标写出名称）、主体、氛围、光线、一句简短图注，以及是否适合当封面。
 只描述照片里看得到的内容，不确定的地标不要硬猜。所有字段用中文。`;
 
+// One photo's analysis is ~150 tokens of JSON; the cap keeps a model that never stops from running for minutes
+const TOKENS_PER_PHOTO = 600;
+// A batch normally answers in 10–20 s
+const TIMEOUT_MS = 60_000;
+
 const running = new Map<string, Promise<void>>();
 
 // Analyse photos that have no analysis yet; concurrent callers share one run per trip
@@ -27,34 +32,20 @@ export function analyzePending(tripId: string) {
   return run;
 }
 
-async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[]): Promise<PhotoAnalysis[]> {
+async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], count: number): Promise<PhotoAnalysis[]> {
   if (backend.kind === 'openai') {
-    // TEMP DEBUG: compare request shapes
-    const parts = toOAParts(content);
-    const img = parts.filter((p) => p.type === 'image_url');
-    const txt = parts.filter((p) => p.type === 'text').map((p: any) => p.text).join('\n');
-    const variants: Record<string, any[]> = {
-      A_current: [{ role: 'user', content: [...parts, { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
-      B_system: [{ role: 'system', content: '你是看图助手。' }, { role: 'user', content: [...parts, { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
-      C_noSchema: [{ role: 'user', content: [...parts, { type: 'text', text: '只输出一个 JSON 对象：{"photos":[{"id","scene","place","city","region","country","subjects","mood","light","caption","cover_worthy"}]}' }] }],
-      D_imageFirst: [{ role: 'user', content: [...img, { type: 'text', text: txt + '\n' + jsonInstruction(PhotoAnalysisSchema) }] }],
-      E_describe: [{ role: 'user', content: [...img, { type: 'text', text: '描述这张照片' }] }],
-    };
-    for (const [k, messages] of Object.entries(variants)) {
-      for (const mt of [8000, 2000]) {
-        try {
-          const r = await chatCompletion(backend.cfg, { model: backend.visionModel, max_tokens: mt, messages });
-          console.log('DBG', k, mt, r.finishReason, JSON.stringify(r.text.slice(0, 160)));
-        } catch (e) {
-          console.log('DBG', k, mt, 'ERR', String(e).slice(0, 160));
-        }
-      }
-    }
-    const res = await chatCompletion(backend.cfg, {
-      model: backend.visionModel,
-      max_tokens: 8000,
-      messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
-    });
+    const res = await chatCompletion(
+      backend.visionCfg,
+      {
+        model: backend.visionModel,
+        max_tokens: TOKENS_PER_PHOTO * count + 200,
+        // Structured output: low temperature keeps vision models on the JSON instead of drifting into noise
+        temperature: 0.2,
+        messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
+      },
+      undefined,
+      { timeoutMs: TIMEOUT_MS },
+    );
     assertOAUsable(res.finishReason);
     return parseJSONReplyOrThrow(PhotoAnalysisSchema, res.text).photos;
   }
@@ -85,7 +76,7 @@ async function doAnalyze(tripId: string) {
         return [{ type: 'text' as const, text: `照片 id=${p.id}｜${time}｜${place}｜${at}｜${p.lighting_tag || '光线未知'}` }, images[j]];
       });
       content.push({ type: 'text', text: PROMPT });
-      const photos = await analyzeBatch(backend, content);
+      const photos = await analyzeBatch(backend, content, batch.length);
       const patches: PhotoPatch[] = [];
       for (const a of photos) {
         const p = batch.find((b) => b.id === a.id);

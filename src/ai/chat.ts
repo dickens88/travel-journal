@@ -181,6 +181,7 @@ async function anthropicTurn({ client, model }: Extract<Backend, { kind: 'anthro
 
 async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system: string, history: OAMessage[], onText: (text: string) => void): Promise<Reply> {
   const seesImages = history.some((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
+  const cfg = seesImages ? backend.visionCfg : backend.cfg;
   const req = {
     model: seesImages ? backend.visionModel : backend.model,
     max_tokens: 8000,
@@ -188,11 +189,11 @@ async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system:
   };
   let res;
   try {
-    res = await chatCompletion(backend.cfg, { ...req, tools: OA_TOOLS }, onText);
+    res = await chatCompletion(cfg, { ...req, tools: OA_TOOLS }, onText);
   } catch (e) {
     // Many hosted vision models can't call tools and reject the request outright; answer without save_note then
     if (!(e instanceof OpenAIError && e.status === 400)) throw e;
-    res = await chatCompletion(backend.cfg, req, onText);
+    res = await chatCompletion(cfg, req, onText);
   }
   assertOAUsable(res.finishReason);
   // Stored in Anthropic block shape so the chat UI, the journal and a later switch back to Claude all read it the same way
