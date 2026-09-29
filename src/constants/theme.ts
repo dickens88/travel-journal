@@ -1,65 +1,43 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import '@/global.css';
-
-import { Platform } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 
 export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
+  paper: '#F6F1E7',
+  card: '#FFFDF8',
+  chip: '#EDE6D6',
+  line: '#E4DCCB',
+  ink: '#1F1B16',
+  inkSoft: '#3A342D',
+  muted: '#6B6257',
+  accent: '#B8432B',
+  accentSoft: '#FBEDE7',
+  teal: '#2E6A6E',
+  tealSoft: '#E3EDEC',
+  sun: '#B06A12',
+  cloud: '#5C7C99',
+  // Marker-pen highlight behind icons and under display headings
+  pop: '#F4BC52',
+  popSoft: '#FBE3B0',
+  onDark: '#FFFDF8',
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+export const Fonts = {
+  // ZCOOL KuaiLe, embedded by the expo-font config plugin: Android names it by file, iOS by PostScript name
+  display: Platform.select({ ios: 'ZCOOLKuaiLe-Regular', default: 'ZCOOLKuaiLe_400Regular' }),
+  serif: Platform.select({ ios: 'Songti SC', default: 'serif' }),
+};
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
+// Display faces ship a single weight; any fontWeight makes Android synthesize a smeared bold
+const display = (fontSize: number, lineHeight: number): TextStyle => ({ fontFamily: Fonts.display, fontSize, lineHeight, fontWeight: 'normal', color: Colors.ink });
 
-export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
+export const Type = {
+  // Tab screen titles
+  hero: display(34, 44),
+  // Trip and journal titles
+  title: display(28, 38),
+  // Day headers, dialog and sheet titles
+  heading: display(21, 29),
+  // Card titles, empty states, stat values
+  subheading: display(17, 24),
+  // Long-form journal text and notes
+  reading: { fontFamily: Fonts.serif, fontSize: 16, lineHeight: 29, color: Colors.ink } as TextStyle,
 } as const;
-
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
