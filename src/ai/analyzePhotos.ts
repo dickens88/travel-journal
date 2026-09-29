@@ -9,6 +9,8 @@ import { listPhotos, updatePhotos, type PhotoPatch } from '@/db/repo';
 import { setJob } from '@/trip/jobs';
 
 const BATCH = 8;
+// Scenes, landmarks and captions read fine at 1024px; about 40% of the image tokens of the stored 1568px copy
+const ANALYZE_EDGE = 1024;
 
 const PROMPT = `以上是一次旅行中的照片，每张前面标了照片 id、当地拍摄时间、系统查到的地名（可能缺失）、GPS 坐标和根据太阳位置推算的光线。
 请逐张描述，用于之后写游记：场景（认得出的地标写出名称）、主体、氛围、光线、一句简短图注，以及是否适合当封面。
@@ -57,7 +59,7 @@ async function doAnalyze(tripId: string) {
     const backend = await getBackend();
     for (let i = 0; i < pending.length; i += BATCH) {
       const batch = pending.slice(i, i + BATCH);
-      const images = await Promise.all(batch.map((p) => photoImageBlock(p.file)));
+      const images = await Promise.all(batch.map((p) => photoImageBlock(p.file, { width: p.width, height: p.height, maxEdge: ANALYZE_EDGE })));
       const content: BetaContentBlockParam[] = batch.flatMap((p, j) => {
         const time = p.taken_at != null ? fmtLocal(p.taken_at, p.offset_min) : '时间未知';
         const place = photoPlace(p) || '地名未知';

@@ -70,6 +70,13 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // Non-secret preferences too long for the secure store
+  `
+  CREATE TABLE prefs (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 export function migrate() {

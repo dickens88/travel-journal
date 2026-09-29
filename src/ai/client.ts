@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
 import { OpenAIError, type OAConfig } from './openai';
-import { photoBase64 } from '@/photos/storage';
+import { photoBase64, photoUri } from '@/photos/storage';
 import { loadSettings } from '@/settings/settings';
 
 export const MODEL = 'claude-opus-5';
@@ -28,9 +29,19 @@ export async function getBackend(): Promise<Backend> {
   return { kind: 'anthropic', client: new Anthropic({ apiKey: s.apiKey, baseURL: s.baseURL.trim() || undefined, maxRetries: 2 }) };
 }
 
-// A stored trip photo as an API image block
-export async function photoImageBlock(file: string) {
-  return { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: await photoBase64(file) } };
+// A stored trip photo as an API image block. With `fit`, a copy whose long edge exceeds maxEdge is shrunk first —
+// image tokens scale with pixel count, so this trades detail for cost.
+export async function photoImageBlock(file: string, fit?: { width: number; height: number; maxEdge: number }) {
+  let data: string;
+  if (fit && Math.max(fit.width, fit.height) > fit.maxEdge) {
+    const size = fit.width >= fit.height ? { width: fit.maxEdge } : { height: fit.maxEdge };
+    const image = await ImageManipulator.manipulate(photoUri(file)).resize(size).renderAsync();
+    const saved = await image.saveAsync({ base64: true, compress: 0.8, format: SaveFormat.JPEG });
+    data = saved.base64!;
+  } else {
+    data = await photoBase64(file);
+  }
+  return { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data } };
 }
 
 export function describeError(e: unknown): string {

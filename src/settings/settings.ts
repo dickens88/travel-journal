@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
-import Storage from 'expo-sqlite/kv-store';
 import { useSyncExternalStore } from 'react';
 
+import { db } from '@/db/db';
 import { createSignal } from '@/utils/signal';
 
 export type Provider = 'anthropic' | 'openai';
@@ -22,7 +22,7 @@ export type Settings = {
   tts: boolean;
 };
 
-// Short values live in the secure store; long free text goes to SQLite, since secure store values may be capped around 2 KB
+// Short values live in the secure store; long free text goes to the app database, since secure store values may be capped around 2 KB
 const SECURE = {
   provider: 'ai_provider',
   apiKey: 'anthropic_api_key',
@@ -34,6 +34,15 @@ const SECURE = {
   tts: 'tts_enabled',
 } as const;
 const PLAIN = { buddyPrompt: 'buddy_prompt' } as const;
+
+function readPref(key: string) {
+  try {
+    return db.getFirstSync<{ value: string }>('SELECT value FROM prefs WHERE key = ?', key)?.value ?? '';
+  } catch (e) {
+    console.warn(`settings: failed to read ${key}`, e);
+    return '';
+  }
+}
 
 let current: Settings = {
   provider: 'anthropic',
@@ -52,13 +61,21 @@ const changed = createSignal();
 
 export function loadSettings() {
   loaded ??= (async () => {
+    // One unreadable value must not leave the settings screen waiting forever; fall back to its default
     const names = Object.keys(SECURE) as (keyof typeof SECURE)[];
-    const values = await Promise.all(names.map((k) => SecureStore.getItemAsync(SECURE[k])));
+    const values = await Promise.all(
+      names.map((k) =>
+        SecureStore.getItemAsync(SECURE[k]).catch((e) => {
+          console.warn(`settings: failed to read ${k}`, e);
+          return null;
+        }),
+      ),
+    );
     const v = Object.fromEntries(names.map((k, i) => [k, values[i] ?? ''])) as Record<keyof typeof SECURE, string>;
     current = {
       ...v,
       provider: v.provider === 'openai' ? 'openai' : 'anthropic',
-      buddyPrompt: (await Storage.getItemAsync(PLAIN.buddyPrompt)) ?? '',
+      buddyPrompt: readPref(PLAIN.buddyPrompt),
       tts: v.tts !== '0',
     };
     ready = true;
@@ -71,18 +88,20 @@ export function loadSettings() {
 export async function saveSettings(patch: Partial<Settings>) {
   await loadSettings();
   current = { ...current, ...patch };
-  await Promise.all([
-    ...(Object.keys(SECURE) as (keyof typeof SECURE)[]).map((k) =>
+  await Promise.all(
+    (Object.keys(SECURE) as (keyof typeof SECURE)[]).map((k) =>
       SecureStore.setItemAsync(SECURE[k], k === 'tts' ? (current.tts ? '1' : '0') : current[k]),
     ),
-    Storage.setItemAsync(PLAIN.buddyPrompt, current.buddyPrompt),
-  ]);
+  );
+  db.runSync('INSERT INTO prefs (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', PLAIN.buddyPrompt, current.buddyPrompt);
   changed.notify();
 }
 
-// Whether the stored values have arrived; useSettings re-renders when they do
-export function settingsReady() {
-  return ready;
+// Whether the stored values have arrived. A hook rather than a plain getter: the React Compiler
+// memoizes plain calls made during render, which would pin the first `false` forever.
+export function useSettingsReady() {
+  loadSettings();
+  return useSyncExternalStore(changed.subscribe, () => ready);
 }
 
 export function useSettings() {

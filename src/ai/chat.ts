@@ -51,12 +51,27 @@ const OA_TOOLS: OATool[] = [
   { type: 'function', function: { name: SAVE_NOTE.name, description: SAVE_NOTE.description, parameters: SAVE_NOTE.input_schema } },
 ];
 
+// Tells the model how to read the stamps below; appended after the (user-editable) persona
+const TIME_NOTE = '用户消息开头括号里是发送时间（用户手机当地时间），最新一条的时间就是「现在」。';
+
+// Send time of a user message. Derived from the stored row so earlier turns render byte-identical every request —
+// a "current time" in the system prompt would change each minute and void the prompt cache for the whole history.
+function sentAt(r: ChatRow, blocks: StoredBlock[]): string | null {
+  if (r.role !== 'user' || !blocks.some((b) => b.type === 'text' || b.type === 'trip_photo')) return null;
+  const { date, hm } = localParts(r.created_at);
+  return `（${date} ${hm} 发送）`;
+}
+
 // Stored rows -> API messages: expand trip photos to images, merge same-role neighbours
 async function toApiMessages(rows: ChatRow[], photoById: Map<string, Photo>, image: (file: string) => Promise<unknown>): Promise<BetaMessageParam[]> {
   const out: BetaMessageParam[] = [];
   for (const r of rows) {
+    const blocks = blocksOf(r.content_json);
     const content: any[] = [];
-    for (const b of blocksOf(r.content_json)) {
+    // Tool results are stored as their own rows, so a stamped row never has to lead with one
+    const stamp = sentAt(r, blocks);
+    if (stamp) content.push({ type: 'text', text: stamp });
+    for (const b of blocks) {
       if (b.type === 'trip_photo') {
         const photo = photoById.get(b.photo_id);
         if (!photo) continue;
@@ -116,6 +131,8 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
       }
     }
     const parts: OAContentPart[] = [];
+    const stamp = sentAt(r, blocks);
+    if (stamp) parts.push({ type: 'text', text: stamp });
     for (const b of blocks) {
       if (b.type === 'text') parts.push({ type: 'text', text: b.text });
       if (b.type === 'trip_photo') {
@@ -133,15 +150,14 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
 
 type Reply = { content: StoredBlock[]; pause: boolean };
 
-async function anthropicTurn(client: Anthropic, system: string, now: string, messages: BetaMessageParam[], onText: (text: string) => void): Promise<Reply> {
+async function anthropicTurn(client: Anthropic, system: string, messages: BetaMessageParam[], onText: (text: string) => void): Promise<Reply> {
   const stream = client.beta.messages.stream({
     model: MODEL,
     max_tokens: 16000,
     ...FALLBACK,
-    system: [
-      { type: 'text', text: system, cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: now },
-    ],
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    // Second breakpoint on the last block: history (with its images) is re-sent every turn and read back at cache price
+    cache_control: { type: 'ephemeral' },
     tools: TOOLS,
     output_config: { effort: 'medium' },
     messages,
@@ -156,7 +172,7 @@ async function anthropicTurn(client: Anthropic, system: string, now: string, mes
   return { content: msg.content as StoredBlock[], pause: msg.stop_reason === 'pause_turn' };
 }
 
-async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system: string, now: string, history: OAMessage[], onText: (text: string) => void): Promise<Reply> {
+async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system: string, history: OAMessage[], onText: (text: string) => void): Promise<Reply> {
   const seesImages = history.some((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
   const res = await chatCompletion(
     backend.cfg,
@@ -164,7 +180,7 @@ async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system:
       model: seesImages ? backend.visionModel : backend.model,
       max_tokens: 8000,
       tools: OA_TOOLS,
-      messages: [{ role: 'system', content: `${system}\n\n${now}\n${NO_SEARCH}` }, ...history],
+      messages: [{ role: 'system', content: `${system}\n${NO_SEARCH}` }, ...history],
     },
     onText,
   );
@@ -201,9 +217,7 @@ export async function sendBuddyMessage(tripId: string, text: string, photoId: st
   };
   const context = buildTripContext(trip, photos, stopsFromPhotos(photos), listDays(tripId), listNotes(tripId));
   const { buddyPrompt, tts } = await loadSettings();
-  const system = `${buddyPrompt.trim() || BUDDY_PROMPT}\n\n<trip>\n${context}\n</trip>`;
-  const nowParts = localParts(Date.now());
-  const now = `现在是用户手机上的 ${nowParts.date} ${nowParts.hm}。`;
+  const system = `${buddyPrompt.trim() || BUDDY_PROMPT}\n${TIME_NOTE}\n\n<trip>\n${context}\n</trip>`;
 
   let answer = '';
   for (let turn = 0; turn < 6; turn++) {
@@ -212,8 +226,8 @@ export async function sendBuddyMessage(tripId: string, text: string, photoId: st
     const rows = listChat(tripId);
     const reply =
       backend.kind === 'openai'
-        ? await openaiTurn(backend, system, now, await toOAMessages(rows, photoById, image), onText)
-        : await anthropicTurn(backend.client, system, now, await toApiMessages(rows, photoById, image), onText);
+        ? await openaiTurn(backend, system, await toOAMessages(rows, photoById, image), onText)
+        : await anthropicTurn(backend.client, system, await toApiMessages(rows, photoById, image), onText);
     if (reply.content.length) addChatMessage(tripId, 'assistant', reply.content);
     answer = textOf(reply.content);
 

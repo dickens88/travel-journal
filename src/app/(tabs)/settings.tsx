@@ -7,7 +7,7 @@ import { describeError, getBackend, MODEL } from '@/ai/client';
 import { chatCompletion } from '@/ai/openai';
 import { Button, Card, Display, Segmented } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
-import { saveSettings, settingsReady, useSettings, type Provider, type Settings } from '@/settings/settings';
+import { saveSettings, useSettings, useSettingsReady, type Provider, type Settings } from '@/settings/settings';
 
 const MAAS_URL = 'https://api.modelarts-maas.com/openai/v1';
 
@@ -15,9 +15,8 @@ type Status = { ok: boolean; text: string } | null;
 type ModelFields = Pick<Settings, 'provider' | 'apiKey' | 'baseURL' | 'openaiKey' | 'openaiBaseURL' | 'openaiModel' | 'openaiVisionModel'>;
 
 export default function SettingsScreen() {
-  useSettings();
   // Secure store loads asynchronously; seed the form only once saved values arrive
-  return settingsReady() ? <SettingsForm /> : null;
+  return useSettingsReady() ? <SettingsForm /> : null;
 }
 
 function SettingsForm() {
@@ -117,7 +116,7 @@ function ModelCard() {
       />
       {openai ? (
         <>
-          <Field label="Base URL" value={form.openaiBaseURL} onChangeText={(openaiBaseURL) => set({ openaiBaseURL })} placeholder={MAAS_URL} keyboardType="url" />
+          <Field label="Base URL" value={form.openaiBaseURL} onChangeText={(openaiBaseURL) => set({ openaiBaseURL })} placeholder="https://…/v1" keyboardType="url" />
           {!form.openaiBaseURL ? (
             <Text style={[styles.hint, { color: Colors.teal }]} onPress={() => set({ openaiBaseURL: MAAS_URL })}>
               使用华为云 MaaS 地址
