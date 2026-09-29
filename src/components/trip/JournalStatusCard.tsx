@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { ErrorNotice } from '@/components/common/ErrorNotice';
 import { Button, Icon } from '@/components/common/ui';
 import { Colors, Fonts } from '@/constants/theme';
 import { generateJournal } from '@/ai/generateJournal';
@@ -45,11 +46,12 @@ export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs
         {action ? <Button compact label={action.label} onPress={action.run} /> : null}
       </View>
       {jobs.error ? (
-        <Pressable style={styles.error} onPress={() => setJob(tripId, { error: undefined })}>
-          <Icon name="warning" size={18} color={Colors.accent} />
-          <Text style={styles.errorText}>{jobs.error}</Text>
-          <Icon name="close" size={14} color={Colors.muted} duo={null} />
-        </Pressable>
+        <ErrorNotice
+          title={jobs.error.title}
+          message={jobs.error.message}
+          onDismiss={() => setJob(tripId, { error: undefined })}
+          onRetry={jobs.error.retry}
+        />
       ) : null}
     </View>
   );
@@ -59,6 +61,4 @@ const styles = StyleSheet.create({
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, paddingHorizontal: 16, borderRadius: 18, backgroundColor: Colors.ink },
   title: { fontFamily: Fonts.display, color: Colors.onDark, fontSize: 17 },
   sub: { color: '#D8CFBD', fontSize: 12, lineHeight: 17 },
-  error: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 12, backgroundColor: Colors.accentSoft },
-  errorText: { flex: 1, fontSize: 13, color: Colors.ink, lineHeight: 19 },
 });

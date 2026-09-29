@@ -11,6 +11,8 @@ export type Settings = {
   // Anthropic
   apiKey: string;
   baseURL: string;
+  // Empty means the app's default model
+  anthropicModel: string;
   // OpenAI-compatible (Huawei Cloud MaaS, DeepSeek, Qwen, …)
   openaiKey: string;
   openaiBaseURL: string;
@@ -27,6 +29,7 @@ const SECURE = {
   provider: 'ai_provider',
   apiKey: 'anthropic_api_key',
   baseURL: 'anthropic_base_url',
+  anthropicModel: 'anthropic_model',
   openaiKey: 'openai_api_key',
   openaiBaseURL: 'openai_base_url',
   openaiModel: 'openai_model',
@@ -48,6 +51,7 @@ let current: Settings = {
   provider: 'anthropic',
   apiKey: '',
   baseURL: '',
+  anthropicModel: '',
   openaiKey: '',
   openaiBaseURL: '',
   openaiModel: '',
@@ -55,11 +59,12 @@ let current: Settings = {
   buddyPrompt: '',
   tts: true,
 };
-let loaded: Promise<Settings> | null = null;
+let loaded: Promise<void> | null = null;
 let ready = false;
 const changed = createSignal();
 
-export function loadSettings() {
+// Resolves to the latest values: saveSettings replaces `current`, so the first load's snapshot would go stale
+export async function loadSettings(): Promise<Settings> {
   loaded ??= (async () => {
     // One unreadable value must not leave the settings screen waiting forever; fall back to its default
     const names = Object.keys(SECURE) as (keyof typeof SECURE)[];
@@ -80,9 +85,9 @@ export function loadSettings() {
     };
     ready = true;
     changed.notify();
-    return current;
   })();
-  return loaded;
+  await loaded;
+  return current;
 }
 
 export async function saveSettings(patch: Partial<Settings>) {
@@ -107,4 +112,9 @@ export function useSettingsReady() {
 export function useSettings() {
   loadSettings();
   return useSyncExternalStore(changed.subscribe, () => current);
+}
+
+// Whether the selected provider has what it needs to make a call (mirrors getBackend's checks)
+export function aiConfigured(s: Settings) {
+  return s.provider === 'openai' ? !!(s.openaiKey && s.openaiBaseURL.trim() && s.openaiModel.trim()) : !!s.apiKey;
 }

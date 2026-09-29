@@ -1,19 +1,23 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { sendBuddyMessage, speak } from '@/ai/chat';
+import { retryBuddyMessage, sendBuddyMessage, speak } from '@/ai/chat';
 import { blocksOf, isToolResultTurn, isUserTurn, photoIdsOf, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import { describeError } from '@/ai/client';
+import { ErrorNotice } from '@/components/common/ErrorNotice';
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Button, Chip, Display, Icon } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { getTrip, listChat, listNotes, listPhotos } from '@/db/repo';
 import type { ChatRow, Photo } from '@/db/types';
 import { useQuery } from '@/db/useQuery';
-import { saveSettings, useSettings } from '@/settings/settings';
+import { aiConfigured, saveSettings, useSettings, useSettingsReady } from '@/settings/settings';
 import { localParts } from '@/utils/time';
+
+// Sent on the user's behalf by the photo viewer's one-tap "让搭子讲讲"
+const DESCRIBE_PROMPT = '讲讲这张照片吧：拍的是哪里、画面里有什么，有什么值得知道的故事或看点？';
 
 // Memoized: the sheet re-renders on every streamed token
 const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map<string, Photo> }) {
@@ -60,37 +64,58 @@ const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map
 });
 
 export default function BuddySheet() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // photo: attach this trip photo; ask=describe: also send DESCRIBE_PROMPT right away
+  const { id, photo, ask } = useLocalSearchParams<{ id: string; photo?: string; ask?: string }>();
   const insets = useSafeAreaInsets();
   const settings = useSettings();
+  const settingsReady = useSettingsReady();
   const trip = useQuery(`getTrip:${id}`, () => getTrip(id));
   const rows = useQuery(`listChat:${id}`, () => listChat(id));
   const photos = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const noteCount = useQuery(`listNotes:${id}`, () => listNotes(id)).length;
   const [input, setInput] = useState('');
-  const [photoId, setPhotoId] = useState<string | null>(null);
+  const [photoId, setPhotoId] = useState<string | null>(photo ?? null);
+  const autoAsked = useRef(false);
+  // Decided once: `ask` is cleared after the auto-send, which must not then pop the keyboard
+  const [focusInput] = useState(() => !!photo && ask !== 'describe');
   const [picking, setPicking] = useState(false);
   const [streaming, setStreaming] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
   const scroll = useRef<ScrollView>(null);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || streaming !== null) return;
-    setInput('');
-    setPhotoId(null);
-    setPicking(false);
+  // Runs one exchange; on failure, retry answers the saved question again, or resends it if it never got saved
+  const exchange = async (job: () => Promise<void>, resend: () => void) => {
     setError(null);
     setStreaming('');
+    const before = listChat(id).length;
     try {
-      await sendBuddyMessage(id, text, photoId, setStreaming);
+      await job();
     } catch (e) {
-      setError(describeError(e));
+      const saved = listChat(id).length > before;
+      setError({ message: describeError(e), retry: saved ? () => exchange(() => retryBuddyMessage(id, setStreaming), resend) : resend });
     } finally {
       setStreaming(null);
     }
   };
+
+  const send = async (preset?: string, attach = photoId) => {
+    const text = (preset ?? input).trim();
+    if (!text || streaming !== null) return;
+    if (preset === undefined) setInput('');
+    setPhotoId(null);
+    setPicking(false);
+    await exchange(() => sendBuddyMessage(id, text, attach, setStreaming), () => send(text, attach));
+  };
+
+  useEffect(() => {
+    if (ask !== 'describe' || !photo || autoAsked.current || !settingsReady) return;
+    autoAsked.current = true;
+    // Clear the flag so a remount of this screen doesn't ask again
+    router.setParams({ ask: undefined });
+    send(DESCRIBE_PROMPT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, photo, settingsReady]);
 
   // Show a date divider before the first user message of each day
   const dividers = useMemo(() => {
@@ -130,9 +155,9 @@ export default function BuddySheet() {
           <Icon name="sparkle" size={14} color="#4A433B" />
           <Text style={{ fontSize: 12, color: '#4A433B' }}>已了解 {photos.length} 张照片 · {noteCount} 条随手记</Text>
         </View>
-        {!settings.apiKey ? (
+        {settingsReady && !aiConfigured(settings) ? (
           <View style={styles.noKey}>
-            <Text style={{ flex: 1, fontSize: 13 }}>还没有填写 Claude API Key，搭子暂时说不了话</Text>
+            <Text style={{ flex: 1, fontSize: 13 }}>还没有设置 AI 模型和 API Key，搭子暂时说不了话</Text>
             <Button compact label="去设置" onPress={() => router.push('/settings')} />
           </View>
         ) : null}
@@ -147,7 +172,7 @@ export default function BuddySheet() {
             <Text style={styles.botText}>{streaming || '想一想…'}</Text>
           </View>
         ) : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error && streaming === null ? <ErrorNotice title="搭子没能回复" message={error.message} onRetry={error.retry} onDismiss={() => setError(null)} /> : null}
       </ScrollView>
       {picking ? (
         <ScrollView horizontal style={styles.picker} contentContainerStyle={{ gap: 6, padding: 8 }}>
@@ -170,13 +195,14 @@ export default function BuddySheet() {
         <TextInput
           value={input}
           onChangeText={setInput}
-          placeholder="问点什么，也可以用输入法语音输入"
+          placeholder={photoId ? '问问这张照片…' : '问点什么，也可以用输入法语音输入'}
+          autoFocus={focusInput}
           placeholderTextColor={Colors.muted}
           style={styles.input}
           multiline
           accessibilityLabel="向旅行搭子提问"
         />
-        <Pressable onPress={send} style={[styles.send, (!input.trim() || streaming !== null) && { opacity: 0.4 }]} accessibilityLabel="发送">
+        <Pressable onPress={() => send()} style={[styles.send, (!input.trim() || streaming !== null) && { opacity: 0.4 }]} accessibilityLabel="发送">
           <Icon name="send" size={22} color={Colors.onDark} />
         </Pressable>
       </View>
@@ -201,7 +227,6 @@ const styles = StyleSheet.create({
   botText: { fontSize: 15, lineHeight: 25, color: Colors.ink },
   speak: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   noteSaved: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 14, backgroundColor: Colors.accentSoft },
-  error: { fontSize: 13, color: Colors.accent, textAlign: 'center' },
   picker: { maxHeight: 88, backgroundColor: Colors.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.line },
   pickThumb: { width: 72, height: 72, borderRadius: 8 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: Colors.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.line },

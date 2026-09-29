@@ -1,0 +1,57 @@
+# 推送 v* 标签后，在 GitHub 上本地打包 APK 并发布到 Releases。
+# 签名密钥存在 Expo 云端，需要在仓库 Settings → Secrets → Actions 里配置 EXPO_TOKEN。
+name: Android APK Release
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx expo lint
+
+      - name: 打包 APK
+        run: |
+          mkdir -p build-output
+          eas build -p android --profile preview --local --non-interactive \
+            --output build-output/travel-journal.apk
+
+      - run: cp build-output/travel-journal.apk "build-output/travel-journal-${GITHUB_REF_NAME}.apk"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: build-output/travel-journal-${{ github.ref_name }}.apk

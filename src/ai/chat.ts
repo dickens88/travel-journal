@@ -1,16 +1,15 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { BetaMessageParam, BetaToolResultBlockParam, BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import * as Speech from 'expo-speech';
 import { z } from 'zod';
 
 import { blocksOf, textOf, type StoredBlock } from './chatContent';
-import { assertOAUsable, assertUsable, FALLBACK, getBackend, MODEL, photoImageBlock, type Backend } from './client';
-import { chatCompletion, toOAParts, type OAContentPart, type OAMessage, type OATool, type OAToolCall } from './openai';
+import { assertOAUsable, assertUsable, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
+import { chatCompletion, OpenAIError, toOAParts, type OAContentPart, type OAMessage, type OATool, type OAToolCall } from './openai';
 import { buildTripContext } from './tripContext';
 import { addChatMessage, addNote, getTrip, listChat, listDays, listNotes, listPhotos } from '@/db/repo';
-import type { ChatRow, Photo } from '@/db/types';
+import type { ChatRow, Photo, Trip } from '@/db/types';
 import { loadSettings } from '@/settings/settings';
-import { stopsFromPhotos } from '@/trip/derive';
+import { photoAnalysis, stopsFromPhotos } from '@/trip/derive';
 import { localParts } from '@/utils/time';
 
 // Default buddy persona; the user can replace it in Settings. The trip material is appended after it either way.
@@ -43,8 +42,9 @@ const SAVE_NOTE = {
   },
 };
 
-const TOOLS: BetaToolUnion[] = [
-  { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
+// Haiku only has the basic web search tool
+const tools = (model: string): BetaToolUnion[] => [
+  model.includes('haiku') ? { type: 'web_search_20250305', name: 'web_search', max_uses: 3 } : { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
   { ...SAVE_NOTE, strict: true, eager_input_streaming: true },
 ];
 const OA_TOOLS: OATool[] = [
@@ -106,8 +106,11 @@ function runSaveNote(tripId: string, input: unknown, photoById: Map<string, Phot
 }
 
 // Stored rows -> OpenAI messages. Only text, trip photos and save_note calls carry over; Anthropic web search blocks are dropped.
+// Only the newest user message carries real images; earlier photos become text references, so a follow-up
+// question goes to the (tool-capable) text model instead of re-sending every image to the vision model
 async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, image: (file: string) => Promise<StoredBlock>): Promise<OAMessage[]> {
   const out: OAMessage[] = [];
+  const latestAsk = rows.findLast((r) => sentAt(r, blocksOf(r.content_json)) !== null);
   for (const r of rows) {
     const blocks = blocksOf(r.content_json);
     const prev = out[out.length - 1];
@@ -138,7 +141,12 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
       if (b.type === 'trip_photo') {
         const photo = photoById.get(b.photo_id);
         if (!photo) continue;
-        parts.push({ type: 'text', text: `（照片 id=${photo.id}）` }, ...toOAParts([await image(photo.file)]));
+        if (r === latestAsk) {
+          parts.push({ type: 'text', text: `（照片 id=${photo.id}）` }, ...toOAParts([await image(photo.file)]));
+        } else {
+          const seen = photoAnalysis(photo)?.caption;
+          parts.push({ type: 'text', text: `（之前发过的照片 id=${photo.id}${seen ? `：${seen}` : ''}）` });
+        }
       }
     }
     if (!parts.length) continue;
@@ -150,16 +158,15 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
 
 type Reply = { content: StoredBlock[]; pause: boolean };
 
-async function anthropicTurn(client: Anthropic, system: string, messages: BetaMessageParam[], onText: (text: string) => void): Promise<Reply> {
+async function anthropicTurn({ client, model }: Extract<Backend, { kind: 'anthropic' }>, system: string, messages: BetaMessageParam[], onText: (text: string) => void): Promise<Reply> {
   const stream = client.beta.messages.stream({
-    model: MODEL,
+    ...claudeBase(model),
     max_tokens: 16000,
-    ...FALLBACK,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     // Second breakpoint on the last block: history (with its images) is re-sent every turn and read back at cache price
     cache_control: { type: 'ephemeral' },
-    tools: TOOLS,
-    output_config: { effort: 'medium' },
+    tools: tools(model),
+    output_config: claudeEffort(model, 'medium'),
     messages,
   });
   let shown = '';
@@ -174,16 +181,19 @@ async function anthropicTurn(client: Anthropic, system: string, messages: BetaMe
 
 async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system: string, history: OAMessage[], onText: (text: string) => void): Promise<Reply> {
   const seesImages = history.some((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
-  const res = await chatCompletion(
-    backend.cfg,
-    {
-      model: seesImages ? backend.visionModel : backend.model,
-      max_tokens: 8000,
-      tools: OA_TOOLS,
-      messages: [{ role: 'system', content: `${system}\n${NO_SEARCH}` }, ...history],
-    },
-    onText,
-  );
+  const req = {
+    model: seesImages ? backend.visionModel : backend.model,
+    max_tokens: 8000,
+    messages: [{ role: 'system' as const, content: `${system}\n${NO_SEARCH}` }, ...history],
+  };
+  let res;
+  try {
+    res = await chatCompletion(backend.cfg, { ...req, tools: OA_TOOLS }, onText);
+  } catch (e) {
+    // Many hosted vision models can't call tools and reject the request outright; answer without save_note then
+    if (!(e instanceof OpenAIError && e.status === 400)) throw e;
+    res = await chatCompletion(backend.cfg, req, onText);
+  }
   assertOAUsable(res.finishReason);
   // Stored in Anthropic block shape so the chat UI, the journal and a later switch back to Claude all read it the same way
   const content: StoredBlock[] = res.text.trim() ? [{ type: 'text', text: res.text }] : [];
@@ -206,7 +216,17 @@ export async function sendBuddyMessage(tripId: string, text: string, photoId: st
   if (photoId) userBlocks.push({ type: 'trip_photo', photo_id: photoId });
   userBlocks.push({ type: 'text', text });
   addChatMessage(tripId, 'user', userBlocks);
+  await answerLatest(tripId, trip, backend, onText);
+}
 
+// Answer again after a failed reply, reusing the question already saved instead of storing it twice
+export async function retryBuddyMessage(tripId: string, onText: (text: string) => void) {
+  const trip = getTrip(tripId);
+  if (!trip) return;
+  await answerLatest(tripId, trip, await getBackend(), onText);
+}
+
+async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText: (text: string) => void) {
   const photos = listPhotos(tripId);
   const photoById = new Map(photos.map((p) => [p.id, p]));
   // History images are re-sent every turn; read each file once per message
@@ -227,7 +247,7 @@ export async function sendBuddyMessage(tripId: string, text: string, photoId: st
     const reply =
       backend.kind === 'openai'
         ? await openaiTurn(backend, system, await toOAMessages(rows, photoById, image), onText)
-        : await anthropicTurn(backend.client, system, await toApiMessages(rows, photoById, image), onText);
+        : await anthropicTurn(backend, system, await toApiMessages(rows, photoById, image), onText);
     if (reply.content.length) addChatMessage(tripId, 'assistant', reply.content);
     answer = textOf(reply.content);
 

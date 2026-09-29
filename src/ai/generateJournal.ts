@@ -2,8 +2,8 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
 import { analyzePending } from './analyzePhotos';
 import { isUserTurn } from './chatContent';
-import { assertOAUsable, assertUsable, describeError, FALLBACK, getBackend, MODEL, type Backend } from './client';
-import { chatCompletion, jsonInstruction, parseJSONReply } from './openai';
+import { assertOAUsable, assertUsable, describeError, claudeBase, claudeEffort, getBackend, type Backend } from './client';
+import { chatCompletion, jsonInstruction, parseJSONReplyOrThrow } from './openai';
 import { JournalSchema, type Journal } from './schemas';
 import { buildChatTranscript, buildTripContext } from './tripContext';
 import { getJournal, getTrip, listChat, listDays, listNotes, listPhotos, markIncluded, saveJournal, updateTrip } from '@/db/repo';
@@ -40,14 +40,13 @@ async function writeJournal(backend: Backend, material: string): Promise<Journal
       ],
     });
     assertOAUsable(res.finishReason);
-    return parseJSONReply(JournalSchema, res.text);
+    return parseJSONReplyOrThrow(JournalSchema, res.text);
   }
   const stream = backend.client.beta.messages.stream({
-    model: MODEL,
+    ...claudeBase(backend.model),
     max_tokens: 32000,
-    ...FALLBACK,
     system: SYSTEM,
-    output_config: { format: betaZodOutputFormat(JournalSchema) },
+    output_config: { ...claudeEffort(backend.model, 'high'), format: betaZodOutputFormat(JournalSchema) },
     messages: [{ role: 'user', content: material }],
   });
   const res = await stream.finalMessage();
@@ -103,7 +102,7 @@ export async function generateJournal(tripId: string) {
       updateTrip(tripId, { cover_photo_id: cover.id });
     }
   } catch (e) {
-    setJob(tripId, { error: describeError(e) });
+    setJob(tripId, { error: { title: '游记生成失败', message: describeError(e), retry: () => generateJournal(tripId) } });
   } finally {
     setJob(tripId, { generating: false });
   }

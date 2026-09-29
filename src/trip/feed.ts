@@ -1,5 +1,6 @@
 import { blocksOf, isUserTurn, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import type { ChatRow, Note, Photo } from '@/db/types';
+import { photoPlace } from '@/photos/describe';
 import { localParts } from '@/utils/time';
 
 export type FeedItem =
@@ -23,6 +24,11 @@ export type FeedDay = { date: string; items: FeedItem[] };
 
 const SESSION_GAP_MS = 30 * 60_000;
 
+// Local day a photo belongs to in the feed: shot time at its own offset, else when it was added
+export function photoDate(p: Photo) {
+  return localParts(p.taken_at ?? p.added_at, p.taken_at != null ? p.offset_min : undefined).date;
+}
+
 export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): FeedDay[] {
   const byDay = new Map<string, FeedItem[]>();
   const push = (date: string, item: FeedItem) => {
@@ -32,8 +38,7 @@ export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): Fee
 
   const batches = new Map<string, { date: string; photos: Photo[] }>();
   for (const p of photos) {
-    const t = p.taken_at ?? p.added_at;
-    const date = localParts(t, p.taken_at != null ? p.offset_min : undefined).date;
+    const date = photoDate(p);
     const key = `${p.batch_id}|${date}`;
     if (!batches.has(key)) batches.set(key, { date, photos: [] });
     batches.get(key)!.photos.push(p);
@@ -41,7 +46,7 @@ export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): Fee
   for (const [key, b] of batches) {
     const first = b.photos[0];
     const t = first.taken_at ?? first.added_at;
-    const places = [...new Set(b.photos.map((p) => p.place_name).filter(Boolean) as string[])];
+    const places = [...new Set(b.photos.map(photoPlace).filter(Boolean) as string[])];
     push(b.date, { kind: 'photos', key, time: t, hm: localParts(t, first.taken_at != null ? first.offset_min : undefined).hm, photos: b.photos, places });
   }
 

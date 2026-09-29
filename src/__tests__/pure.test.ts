@@ -6,6 +6,7 @@ import { haversineKm } from '@/geo/distance';
 import { interpolateMissing } from '@/geo/interpolate';
 import { describeLighting } from '@/geo/lighting';
 import { inferTransport } from '@/geo/transport';
+import { cameraName, cameraSummary } from '@/photos/describe';
 import { parseExif, parseOffset } from '@/photos/exif';
 import { computeTripStats } from '@/stats/tripStats';
 import { formatDayLabel, localParts } from '@/utils/time';
@@ -43,6 +44,35 @@ describe('exif', () => {
     );
     expect(r.takenAt).toBe(at('2026-07-03T02:00:00Z'));
     expect(r).toMatchObject({ lat: -12.5, lng: -70, flash: true });
+  });
+  it('reads camera details and derives the zone from the GPS clock (Android, no OffsetTime)', () => {
+    const r = parseExif(
+      {
+        Make: 'HUAWEI',
+        Model: 'HUAWEI Mate 60 Pro',
+        DateTimeOriginal: '2026:08:23 15:07:00',
+        GPSDateStamp: '2026:08:23',
+        GPSTimeStamp: '13:07:00',
+        GPSLatitude: '59/1,54/1,25686035/1000000',
+        GPSLatitudeRef: 'N',
+        GPSLongitude: '10/1,44/1,50342330/1000000',
+        GPSLongitudeRef: 'E',
+        FocalLength: 5.75,
+        FocalLengthIn35mmFilm: 60,
+        ExposureBiasValue: 0,
+        ExposureTime: 0.000428,
+        FNumber: 2,
+        ISOSpeedRatings: 50,
+      },
+      () => 0,
+    );
+    expect(r.offsetMin).toBe(120);
+    expect(r.takenAt).toBe(at('2026-08-23T13:07:00Z'));
+    expect(r.lat).toBeCloseTo(59.9071, 4);
+    expect(r.lng).toBeCloseTo(10.7473, 4);
+    expect(r).toMatchObject({ make: 'HUAWEI', model: 'HUAWEI Mate 60 Pro', focalLength: 5.75, focal35: 60 });
+    expect(cameraName(r)).toBe('HUAWEI Mate 60 Pro');
+    expect(cameraSummary(r)).toBe('60mm · 1/2336s · f/2 · ISO 50');
   });
   it('ignores 0,0 GPS and bad offsets', () => {
     expect(parseExif({ '{GPS}': { Latitude: 0, Longitude: 0 } }, () => 0).lat).toBeUndefined();
@@ -105,6 +135,9 @@ describe('lighting', () => {
     expect(describeLighting(at('2025-11-11T21:40:00Z'), 35, 135.77, {})).toBe('黄金时刻');
     expect(describeLighting(at('2025-11-12T03:00:00Z'), 35, 135.77, { brightness: 7 })).toBe('日光');
     expect(describeLighting(null, null, null, { iso: 3200, flash: true })).toBe('弱光 · 闪光');
+    // Huawei writes BrightnessValue 0 even in bright sun; the exposure itself says EV ~14
+    expect(describeLighting(null, null, null, { brightness: 0, exposureTime: 0.000428, fNumber: 2, iso: 50 })).toBe('日光');
+    expect(describeLighting(null, null, null, { exposureTime: 1 / 30, fNumber: 1.8, iso: 1600 })).toBe('弱光');
   });
 });
 

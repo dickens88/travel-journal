@@ -6,35 +6,85 @@ import { Card, Chip, Icon, Serif } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { deleteNote } from '@/db/repo';
 import type { Photo } from '@/db/types';
+import { cameraSummary, formatCoord, photoExif } from '@/photos/describe';
+import { photoAnalysis } from '@/trip/derive';
 import type { FeedItem } from '@/trip/feed';
 import type { TripJobs } from '@/trip/jobs';
+import { recognizePhotos } from '@/trip/recognize';
+import { localParts } from '@/utils/time';
 
 function Time({ hm }: { hm: string }) {
   return <Text style={styles.time}>{hm}</Text>;
 }
 
-function PhotoStrip({ photos }: { photos: Photo[] }) {
+function openPhoto(tripId: string, photoId: string) {
+  router.push({ pathname: '/trip/[id]/photo', params: { id: tripId, photo: photoId } });
+}
+
+function PhotoStrip({ photos, tripId }: { photos: Photo[]; tripId: string }) {
   const shown = photos.slice(0, photos.length > 4 ? 3 : 4);
   return (
     <View style={styles.strip}>
       {shown.map((p) => (
-        <PhotoThumb key={p.id} file={p.file} style={styles.thumb} />
+        <Pressable key={p.id} onPress={() => openPhoto(tripId, p.id)} style={styles.thumb} accessibilityRole="imagebutton" accessibilityLabel="查看大图">
+          <PhotoThumb file={p.file} style={StyleSheet.absoluteFill} />
+          {p.lat != null ? (
+            <View style={styles.pin}>
+              <Icon name="pin" size={11} color={Colors.onDark} duo={null} />
+            </View>
+          ) : null}
+        </Pressable>
       ))}
       {photos.length > 4 ? (
-        <View style={[styles.thumb, styles.more]}>
+        <Pressable onPress={() => openPhoto(tripId, photos[3].id)} style={[styles.thumb, styles.more]} accessibilityRole="button" accessibilityLabel="查看更多照片">
           <Text style={styles.moreText}>+{photos.length - 3}</Text>
-        </View>
+        </Pressable>
       ) : null}
     </View>
   );
 }
 
-function PhotosCard({ item, jobs }: { item: Extract<FeedItem, { kind: 'photos' }>; jobs: TripJobs }) {
+function PhotoMeta({ photos, places }: { photos: Photo[]; places: string[] }) {
+  const located = photos.filter((p) => p.lat != null);
+  const first = located[0];
+  let where = places.slice(0, 3).join('、');
+  if (!where && first) where = formatCoord(first.lat!, first.lng!);
+  if (where && located.length && located.every((p) => p.loc_estimated)) where = `约 ${where}`;
+  const missing = photos.length - located.length;
+
+  const times = photos.flatMap((p) => (p.taken_at != null ? [localParts(p.taken_at, p.offset_min).hm] : []));
+  const range = times.length > 1 && times[0] !== times[times.length - 1] ? `${times[0]}–${times[times.length - 1]}` : times[0];
+  const light = [...new Set(photos.map((p) => p.lighting_tag).filter(Boolean))].slice(0, 2).join('、');
+  const camera = photos.length === 1 ? cameraSummary(photoExif(photos[0])) : '';
+  const caption = photos.length === 1 ? photoAnalysis(photos[0])?.caption : undefined;
+  const info = [range ? `拍摄于 ${range}` : null, light, camera].filter(Boolean).join(' · ');
+
+  return (
+    <View style={{ gap: 3 }}>
+      <View style={styles.metaRow}>
+        <Icon name="pin" size={13} color={where ? Colors.accent : Colors.muted} duo={null} />
+        <Text style={[styles.sub, { flex: 1 }]} numberOfLines={1}>
+          {where || '没有读取到位置信息'}
+          {where && missing ? ` · ${missing} 张无定位` : ''}
+        </Text>
+      </View>
+      {caption ? <Text style={styles.caption} numberOfLines={2}>{caption}</Text> : null}
+      {info ? <Text style={styles.sub} numberOfLines={1}>{info}</Text> : null}
+    </View>
+  );
+}
+
+function PhotosCard({ item, jobs, tripId }: { item: Extract<FeedItem, { kind: 'photos' }>; jobs: TripJobs; tripId: string }) {
   const unanalyzed = item.photos.filter((p) => !p.analysis_json).length;
   const included = item.photos.every((p) => p.journal_included_at != null);
   let chip = null;
   if (unanalyzed && jobs.analyzing) chip = <Chip tone="accent" icon="sparkle" label={`识别中 ${item.photos.length - unanalyzed}/${item.photos.length}`} />;
-  else if (unanalyzed) chip = <Chip label={`${unanalyzed} 张待识别`} />;
+  else if (unanalyzed)
+    chip = (
+      <Pressable onPress={() => recognizePhotos(tripId)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`识别 ${unanalyzed} 张照片`}>
+        <Chip tone="accent" icon="sparkle" label={`识别 ${unanalyzed} 张`} />
+      </Pressable>
+    );
   else if (included) chip = <Text style={styles.done}>已写入游记</Text>;
   return (
     <Card style={{ gap: 10 }}>
@@ -43,8 +93,8 @@ function PhotosCard({ item, jobs }: { item: Extract<FeedItem, { kind: 'photos' }
         <Text style={styles.headText}>添加了 {item.photos.length} 张照片</Text>
         {chip}
       </View>
-      {item.places.length ? <Text style={styles.sub} numberOfLines={1}>{item.places.slice(0, 3).join('、')}</Text> : null}
-      <PhotoStrip photos={item.photos} />
+      <PhotoStrip photos={item.photos} tripId={tripId} />
+      <PhotoMeta photos={item.photos} places={item.places} />
     </Card>
   );
 }
@@ -105,7 +155,7 @@ export function FeedItemView({ item, tripId, jobs, photos }: { item: FeedItem; t
     <View style={styles.row}>
       <Time hm={item.hm} />
       <View style={{ flex: 1 }}>
-        {item.kind === 'photos' ? <PhotosCard item={item} jobs={jobs} /> : null}
+        {item.kind === 'photos' ? <PhotosCard item={item} jobs={jobs} tripId={tripId} /> : null}
         {item.kind === 'note' ? <NoteCard item={item} /> : null}
         {item.kind === 'chat' ? <ChatCard item={item} tripId={tripId} photos={photos} /> : null}
       </View>
@@ -121,7 +171,10 @@ const styles = StyleSheet.create({
   sub: { fontSize: 12, color: Colors.muted },
   done: { fontSize: 11, color: Colors.teal },
   strip: { flexDirection: 'row', gap: 4 },
-  thumb: { flex: 1, aspectRatio: 1, borderRadius: 8 },
+  thumb: { flex: 1, aspectRatio: 1, borderRadius: 8, overflow: 'hidden' },
+  pin: { position: 'absolute', left: 4, bottom: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(20,16,12,0.55)', alignItems: 'center', justifyContent: 'center' },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  caption: { fontSize: 13, lineHeight: 19, color: Colors.inkSoft },
   more: { backgroundColor: Colors.muted, alignItems: 'center', justifyContent: 'center' },
   moreText: { color: Colors.onDark, fontSize: 15, fontWeight: '700' },
   question: { fontSize: 14, fontWeight: '500', lineHeight: 21, color: Colors.ink },

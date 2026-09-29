@@ -13,7 +13,7 @@ import type { Photo } from '@/db/types';
 import { interpolateMissing } from '@/geo/interpolate';
 import { describeLighting } from '@/geo/lighting';
 import { placeName } from '@/geo/place';
-import { loadSettings } from '@/settings/settings';
+import { aiConfigured, loadSettings } from '@/settings/settings';
 import { setJob } from '@/trip/jobs';
 import { newId } from '@/utils/id';
 import { deviceOffsetMin } from '@/utils/time';
@@ -30,7 +30,9 @@ export async function pickPhotos(): Promise<ImportSource[]> {
     exif: true,
     quality: 1,
   });
-  return res.canceled ? [] : res.assets.map((a) => ({ uri: a.uri, width: a.width, height: a.height, exif: a.exif, assetId: a.assetId }));
+  return res.canceled
+    ? []
+    : res.assets.map((a) => ({ uri: a.uri, width: a.width, height: a.height, exif: a.exif, assetId: a.assetId, fileName: a.fileName }));
 }
 
 export type ImportSource = {
@@ -39,6 +41,7 @@ export type ImportSource = {
   height: number;
   exif?: Record<string, any> | null;
   assetId?: string | null;
+  fileName?: string | null;
   location?: { latitude: number; longitude: number } | null;
   created?: number | null;
   // Already read via MediaLibrary, so location/created are as complete as they get
@@ -64,6 +67,27 @@ async function sourceFromLibrary(assetId: string): Promise<ImportSource> {
   };
 }
 
+const HALF_DAY_MS = 14 * 3_600_000;
+
+// The system picker hands back copies with GPS stripped and often no asset id; look the original up
+// in the library by file name (or exact shot time and size) so its location can still be read
+async function findLibraryAsset(a: ImportSource, takenAt: number | null) {
+  if (!a.fileName && takenAt == null) return null;
+  const page = await MediaLibrary.getAssetsAsync({
+    first: 200,
+    mediaType: 'photo',
+    sortBy: [['creationTime', false]],
+    // EXIF times may be read in the wrong zone, so search a generous window
+    ...(takenAt != null ? { createdAfter: takenAt - HALF_DAY_MS, createdBefore: takenAt + HALF_DAY_MS } : {}),
+  });
+  const byName = a.fileName ? page.assets.find((x) => x.filename === a.fileName) : undefined;
+  const byShot =
+    takenAt != null
+      ? page.assets.find((x) => Math.abs(x.creationTime - takenAt) < 2000 && x.width * x.height === a.width * a.height)
+      : undefined;
+  return (byName ?? byShot)?.id ?? null;
+}
+
 export async function importLibrary(tripId: string, assetIds: string[]) {
   if (!assetIds.length) return;
   setJob(tripId, { importing: { done: 0, total: assetIds.length }, error: undefined });
@@ -71,7 +95,7 @@ export async function importLibrary(tripId: string, assetIds: string[]) {
   const results = await Promise.allSettled(assetIds.map(sourceFromLibrary));
   const sources = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
   if (!sources.length) {
-    setJob(tripId, { importing: undefined, error: '这些照片读取不了，试试用系统相册选择' });
+    setJob(tripId, { importing: undefined, error: { title: '导入照片失败', message: '这些照片读取不了，试试用系统相册选择' } });
     return;
   }
   await importAssets(tripId, sources);
@@ -101,22 +125,25 @@ export async function importAssets(tripId: string, assets: ImportSource[]) {
       let offset = ex.offsetMin ?? null;
       let lat = ex.lat ?? a.location?.latitude ?? null;
       let lng = ex.lng ?? a.location?.longitude ?? null;
+      let assetId = a.assetId ?? null;
       if (takenAt == null && a.created) {
         takenAt = a.created;
         offset = deviceOffsetMin(a.created);
       }
-      if ((lat == null || takenAt == null) && a.assetId && !a.fromLibrary) {
+      if ((lat == null || takenAt == null) && !a.fromLibrary) {
         libraryGranted ??= (await requestLibraryAccess().catch(() => ({ granted: false }))).granted;
         if (libraryGranted) {
           try {
-            const fb = await sourceFromLibrary(a.assetId);
+            assetId ??= await findLibraryAsset(a, takenAt);
+            if (!assetId) throw new Error('not in library');
+            const fb = await sourceFromLibrary(assetId);
             if (lat == null && fb.location) ({ latitude: lat, longitude: lng } = fb.location);
             if (takenAt == null && fb.created) {
               takenAt = fb.created;
               offset = deviceOffsetMin(fb.created);
             }
           } catch {
-            // Limited library access can hide the asset; keep what EXIF gave us
+            // Not found, or limited library access hides the asset; keep what EXIF gave us
           }
         }
       }
@@ -125,14 +152,15 @@ export async function importAssets(tripId: string, assets: ImportSource[]) {
       rows.push({
         id,
         trip_id: tripId,
-        asset_id: a.assetId ?? null,
+        asset_id: assetId,
         ...stored,
         taken_at: takenAt,
         offset_min: offset ?? deviceOffsetMin(takenAt ?? addedAt),
         lat,
         lng,
         loc_estimated: 0,
-        altitude: ex.altitude ?? null,
+        // A copy with GPS stripped keeps a zeroed altitude; only trust it next to EXIF coordinates
+        altitude: ex.lat != null ? (ex.altitude ?? null) : null,
         place_name: null,
         country: null,
         region: null,
@@ -151,13 +179,37 @@ export async function importAssets(tripId: string, assets: ImportSource[]) {
     setJob(tripId, { importing: undefined });
   }
   refreshWeather(tripId);
-  if ((await loadSettings()).apiKey) analyzePending(tripId);
+  if (aiConfigured(await loadSettings())) analyzePending(tripId);
 }
 
 const geocodeCache = new Map<string, Location.LocationGeocodedAddress | null>();
 let geocodeAllowed: boolean | undefined;
 
-// Estimate missing positions, then reverse-geocode (cached per ~100 m cell)
+// Reverse-geocode cached per ~100 m cell; throws when the geocoder is unavailable or throttled
+async function geocode(lat: number, lng: number) {
+  // Android's geocoder needs location permission; without it the photo analysis fills place names
+  geocodeAllowed ??= (await Location.requestForegroundPermissionsAsync().catch(() => ({ granted: false }))).granted;
+  if (!geocodeAllowed) return null;
+  const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  if (!geocodeCache.has(key)) {
+    const [addr] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+    geocodeCache.set(key, addr ?? null);
+  }
+  return geocodeCache.get(key) ?? null;
+}
+
+function placeFields(addr: Location.LocationGeocodedAddress): Partial<Photo> {
+  return { place_name: placeName(addr), country: addr.country, region: addr.region, city: addr.city ?? addr.subregion };
+}
+
+// Retry naming one located photo, e.g. when the geocoder was offline during import
+export async function nameLocation(p: Photo) {
+  if (p.lat == null || p.lng == null || p.place_name) return;
+  const addr = await geocode(p.lat, p.lng).catch(() => null);
+  if (addr) updatePhotos([{ id: p.id, fields: placeFields(addr) }]);
+}
+
+// Estimate missing positions, then reverse-geocode
 async function fillLocations(tripId: string) {
   const photos = listPhotos(tripId);
   const estimates = interpolateMissing(photos.map((p) => ({ id: p.id, takenAt: p.taken_at, lat: p.lat, lng: p.lng })));
@@ -171,25 +223,21 @@ async function fillLocations(tripId: string) {
   }
   updatePhotos(estimated);
 
-  // Android's geocoder needs location permission; without it the photo analysis fills place names
-  geocodeAllowed ??= (await Location.requestForegroundPermissionsAsync().catch(() => ({ granted: false }))).granted;
-  if (!geocodeAllowed) return;
   const named: PhotoPatch[] = [];
   for (const p of photos) {
     if (p.lat == null || p.lng == null || p.place_name) continue;
-    const key = `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`;
-    if (!geocodeCache.has(key)) {
-      try {
-        const [addr] = await Location.reverseGeocodeAsync({ latitude: p.lat, longitude: p.lng });
-        geocodeCache.set(key, addr ?? null);
-      } catch {
-        // Geocoder unavailable or throttled; photo analysis fills in place names instead
-        break;
-      }
+    let addr;
+    try {
+      addr = await geocode(p.lat, p.lng);
+    } catch {
+      // Geocoder unavailable or throttled; photo analysis fills in place names instead
+      break;
     }
-    const addr = geocodeCache.get(key);
-    if (!addr) continue;
-    named.push({ id: p.id, fields: { place_name: placeName(addr), country: addr.country, region: addr.region, city: addr.city ?? addr.subregion } });
+    if (!addr) {
+      if (!geocodeAllowed) break;
+      continue;
+    }
+    named.push({ id: p.id, fields: placeFields(addr) });
   }
   updatePhotos(named);
 }

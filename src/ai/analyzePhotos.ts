@@ -1,8 +1,8 @@
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
-import { assertOAUsable, assertUsable, describeError, FALLBACK, getBackend, MODEL, photoImageBlock, type Backend } from './client';
-import { chatCompletion, jsonInstruction, parseJSONReply, toOAParts } from './openai';
+import { assertOAUsable, assertUsable, describeError, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
+import { chatCompletion, jsonInstruction, parseJSONReplyOrThrow, toOAParts } from './openai';
 import { PhotoAnalysisSchema, type PhotoAnalysis } from './schemas';
 import { fmtLocal, photoPlace } from './tripContext';
 import { listPhotos, updatePhotos, type PhotoPatch } from '@/db/repo';
@@ -29,21 +29,39 @@ export function analyzePending(tripId: string) {
 
 async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[]): Promise<PhotoAnalysis[]> {
   if (backend.kind === 'openai') {
+    // TEMP DEBUG: compare request shapes
+    const parts = toOAParts(content);
+    const img = parts.filter((p) => p.type === 'image_url');
+    const txt = parts.filter((p) => p.type === 'text').map((p: any) => p.text).join('\n');
+    const variants: Record<string, any[]> = {
+      A_current: [{ role: 'user', content: [...parts, { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
+      B_system: [{ role: 'system', content: '你是看图助手。' }, { role: 'user', content: [...parts, { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
+      C_noSchema: [{ role: 'user', content: [...parts, { type: 'text', text: '只输出一个 JSON 对象：{"photos":[{"id","scene","place","city","region","country","subjects","mood","light","caption","cover_worthy"}]}' }] }],
+      D_imageFirst: [{ role: 'user', content: [...img, { type: 'text', text: txt + '\n' + jsonInstruction(PhotoAnalysisSchema) }] }],
+      E_describe: [{ role: 'user', content: [...img, { type: 'text', text: '描述这张照片' }] }],
+    };
+    for (const [k, messages] of Object.entries(variants)) {
+      for (const mt of [8000, 2000]) {
+        try {
+          const r = await chatCompletion(backend.cfg, { model: backend.visionModel, max_tokens: mt, messages });
+          console.log('DBG', k, mt, r.finishReason, JSON.stringify(r.text.slice(0, 160)));
+        } catch (e) {
+          console.log('DBG', k, mt, 'ERR', String(e).slice(0, 160));
+        }
+      }
+    }
     const res = await chatCompletion(backend.cfg, {
       model: backend.visionModel,
       max_tokens: 8000,
       messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
     });
     assertOAUsable(res.finishReason);
-    const parsed = parseJSONReply(PhotoAnalysisSchema, res.text);
-    if (!parsed) throw new Error('照片识别结果格式不对，请重试；如果一直失败，换一个支持看图的模型');
-    return parsed.photos;
+    return parseJSONReplyOrThrow(PhotoAnalysisSchema, res.text).photos;
   }
   const res = await backend.client.beta.messages.parse({
-    model: MODEL,
+    ...claudeBase(backend.model),
     max_tokens: 8000,
-    ...FALLBACK,
-    output_config: { effort: 'medium', format: betaZodOutputFormat(PhotoAnalysisSchema) },
+    output_config: { ...claudeEffort(backend.model, 'medium'), format: betaZodOutputFormat(PhotoAnalysisSchema) },
     messages: [{ role: 'user', content }],
   });
   assertUsable(res.stop_reason);
@@ -88,7 +106,7 @@ async function doAnalyze(tripId: string) {
       setJob(tripId, { analyzing: { done, total: pending.length } });
     }
   } catch (e) {
-    setJob(tripId, { error: describeError(e) });
+    setJob(tripId, { error: { title: '照片识别失败', message: describeError(e), retry: () => analyzePending(tripId) } });
   } finally {
     setJob(tripId, { analyzing: undefined });
   }

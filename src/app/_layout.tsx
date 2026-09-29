@@ -38,6 +38,7 @@ export default function RootLayout() {
         <Stack.Screen name="trip/[id]/share" options={{ title: '分享游记' }} />
         <Stack.Screen name="trip/[id]/pick" options={{ title: '添加照片' }} />
         <Stack.Screen name="trip/[id]/buddy" options={{ presentation: 'modal', animation: 'slide_from_bottom', headerShown: false }} />
+        <Stack.Screen name="trip/[id]/photo" options={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
         <Stack.Screen name="trip/[id]/note" options={{ presentation: 'modal', animation: 'slide_from_bottom', headerShown: false }} />
       </Stack>
     </>

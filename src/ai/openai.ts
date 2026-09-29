@@ -67,7 +67,7 @@ export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text
   }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
-    throw new OpenAIError(res.status, errorMessage(raw).slice(0, 300) || res.statusText);
+    throw new OpenAIError(res.status, errorMessage(raw) || res.statusText);
   }
 
   const out: Result = { text: '', toolCalls: [], finishReason: null };
@@ -121,15 +121,30 @@ export function jsonInstruction(schema: z.ZodType) {
 }
 
 // Pull the JSON object out of a reply that may carry <think> blocks or code fences
-export function parseJSONReply<T>(schema: z.ZodType<T>, text: string): T | null {
+function readJSONReply<T>(schema: z.ZodType<T>, text: string): { data: T } | { problem: string } {
   const s = text.replace(/<think>[\s\S]*?<\/think>/g, '');
   const start = s.indexOf('{');
   const end = s.lastIndexOf('}');
-  if (start < 0 || end < start) return null;
+  if (start < 0 || end < start) return { problem: '回复里没有 JSON 对象' };
+  let json: unknown;
   try {
-    const r = schema.safeParse(JSON.parse(s.slice(start, end + 1)));
-    return r.success ? r.data : null;
-  } catch {
-    return null;
+    json = JSON.parse(s.slice(start, end + 1));
+  } catch (e) {
+    return { problem: e instanceof Error ? e.message : String(e) };
   }
+  const r = schema.safeParse(json);
+  return r.success ? { data: r.data } : { problem: z.prettifyError(r.error) };
+}
+
+export function parseJSONReply<T>(schema: z.ZodType<T>, text: string): T | null {
+  const r = readJSONReply(schema, text);
+  return 'data' in r ? r.data : null;
+}
+
+// Same, but a reply that doesn't fit throws with the reason and the start of what the model actually said
+export function parseJSONReplyOrThrow<T>(schema: z.ZodType<T>, text: string): T {
+  const r = readJSONReply(schema, text);
+  if ('data' in r) return r.data;
+  const head = text.trim().slice(0, 600);
+  throw new Error(`模型回复不是要求的 JSON：${r.problem}\n\n模型原文：${head || '（空）'}${text.trim().length > 600 ? '…' : ''}`);
 }

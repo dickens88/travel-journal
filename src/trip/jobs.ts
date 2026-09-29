@@ -3,7 +3,9 @@ import { useSyncExternalStore } from 'react';
 import { createSignal } from '@/utils/signal';
 
 type Progress = { done: number; total: number };
-export type TripJobs = { importing?: Progress; analyzing?: Progress; generating?: boolean; error?: string };
+// A failed background job: what was being done, the raw error, and how to run it again
+export type JobError = { title: string; message: string; retry?: () => void };
+export type TripJobs = { importing?: Progress; analyzing?: Progress; generating?: boolean; error?: JobError };
 
 const jobs = new Map<string, TripJobs>();
 const changed = createSignal();
