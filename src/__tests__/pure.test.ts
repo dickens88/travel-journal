@@ -162,12 +162,15 @@ describe('android exif', () => {
 });
 
 describe('map tiles', () => {
-  it('uses AMap with GCJ-02 shift inside mainland China and OSM elsewhere', () => {
+  it('uses AMap with GCJ-02 shift inside mainland China, OSM elsewhere, and both for mixed trips', () => {
     const beijing = { lat: 39.9087, lng: 116.3975 };
     const kyoto = { lat: 34.9671, lng: 135.7727 };
     expect(chooseTiles([kyoto])).toBe('osm');
-    expect(chooseTiles([kyoto, beijing])).toBe('amap');
+    expect(chooseTiles([beijing])).toBe('amap');
+    expect(chooseTiles([kyoto, beijing])).toBe('mixed');
     expect(toTileCoord(kyoto, 'amap')).toEqual(kyoto);
+    expect(toTileCoord(kyoto, 'mixed')).toEqual(kyoto);
+    expect(toTileCoord(beijing, 'mixed')).toEqual(toTileCoord(beijing, 'amap'));
     const shifted = toTileCoord(beijing, 'amap');
     expect(shifted.lat).not.toBeCloseTo(beijing.lat, 4);
     expect(toTileCoord(beijing, 'osm')).toEqual(beijing);

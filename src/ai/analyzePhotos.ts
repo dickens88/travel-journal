@@ -1,8 +1,9 @@
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
-import { assertUsable, describeError, FALLBACK, getClient, MODEL, photoImageBlock } from './client';
-import { PhotoAnalysisSchema } from './schemas';
+import { assertOAUsable, assertUsable, describeError, FALLBACK, getBackend, MODEL, photoImageBlock, type Backend } from './client';
+import { chatCompletion, jsonInstruction, parseJSONReply, toOAParts } from './openai';
+import { PhotoAnalysisSchema, type PhotoAnalysis } from './schemas';
 import { fmtLocal, photoPlace } from './tripContext';
 import { listPhotos, updatePhotos, type PhotoPatch } from '@/db/repo';
 import { setJob } from '@/trip/jobs';
@@ -24,13 +25,36 @@ export function analyzePending(tripId: string) {
   return run;
 }
 
+async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[]): Promise<PhotoAnalysis[]> {
+  if (backend.kind === 'openai') {
+    const res = await chatCompletion(backend.cfg, {
+      model: backend.visionModel,
+      max_tokens: 8000,
+      messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
+    });
+    assertOAUsable(res.finishReason);
+    const parsed = parseJSONReply(PhotoAnalysisSchema, res.text);
+    if (!parsed) throw new Error('照片识别结果格式不对，请重试；如果一直失败，换一个支持看图的模型');
+    return parsed.photos;
+  }
+  const res = await backend.client.beta.messages.parse({
+    model: MODEL,
+    max_tokens: 8000,
+    ...FALLBACK,
+    output_config: { effort: 'medium', format: betaZodOutputFormat(PhotoAnalysisSchema) },
+    messages: [{ role: 'user', content }],
+  });
+  assertUsable(res.stop_reason);
+  return res.parsed_output?.photos ?? [];
+}
+
 async function doAnalyze(tripId: string) {
   const pending = listPhotos(tripId).filter((p) => !p.analysis_json);
   if (!pending.length) return;
   let done = 0;
   setJob(tripId, { analyzing: { done, total: pending.length }, error: undefined });
   try {
-    const client = await getClient();
+    const backend = await getBackend();
     for (let i = 0; i < pending.length; i += BATCH) {
       const batch = pending.slice(i, i + BATCH);
       const images = await Promise.all(batch.map((p) => photoImageBlock(p.file)));
@@ -41,16 +65,9 @@ async function doAnalyze(tripId: string) {
         return [{ type: 'text' as const, text: `照片 id=${p.id}｜${time}｜${place}｜${at}｜${p.lighting_tag || '光线未知'}` }, images[j]];
       });
       content.push({ type: 'text', text: PROMPT });
-      const res = await client.beta.messages.parse({
-        model: MODEL,
-        max_tokens: 8000,
-        ...FALLBACK,
-        output_config: { effort: 'medium', format: betaZodOutputFormat(PhotoAnalysisSchema) },
-        messages: [{ role: 'user', content }],
-      });
-      assertUsable(res.stop_reason);
+      const photos = await analyzeBatch(backend, content);
       const patches: PhotoPatch[] = [];
-      for (const a of res.parsed_output?.photos ?? []) {
+      for (const a of photos) {
         const p = batch.find((b) => b.id === a.id);
         if (!p) continue;
         // Android phones without Google services often can't reverse-geocode; fall back to the model's reading

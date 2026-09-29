@@ -59,14 +59,23 @@ export function wgs84ToGcj02(p: LatLng): LatLng {
   return { lat: p.lat + dLat, lng: p.lng + dLng };
 }
 
-export type TileSource = 'amap' | 'osm';
+export type TileSource = 'amap' | 'osm' | 'mixed';
 
-// AMap tiles cover mainland China but use GCJ-02 and are blank abroad; elsewhere use OpenStreetMap (WGS-84)
+// [[south, west], [north, east]] of the INCLUDE boxes: where mixed maps draw AMap over OpenStreetMap
+export const CHINA_TILE_BOUNDS = [
+  [Math.min(...INCLUDE.map((b) => b[2])), Math.min(...INCLUDE.map((b) => b[1]))],
+  [Math.max(...INCLUDE.map((b) => b[0])), Math.max(...INCLUDE.map((b) => b[3]))],
+];
+
+// AMap tiles cover mainland China but use GCJ-02 and are blank abroad; OpenStreetMap (WGS-84) covers the rest.
+// Points on both sides (a flight home from Europe, the all-trips footprint) layer AMap over OSM inside China only.
 export function chooseTiles(points: LatLng[]): TileSource {
-  return points.some(inMainlandChina) ? 'amap' : 'osm';
+  const china = points.filter(inMainlandChina).length;
+  if (!china) return 'osm';
+  return china === points.length ? 'amap' : 'mixed';
 }
 
-// Photo GPS is WGS-84; shift into GCJ-02 only when drawing on AMap tiles
+// Photo GPS is WGS-84; shift into GCJ-02 only where it is drawn over AMap tiles
 export function toTileCoord(p: LatLng, tiles: TileSource): LatLng {
-  return tiles === 'amap' ? wgs84ToGcj02(p) : { lat: p.lat, lng: p.lng };
+  return tiles === 'osm' ? { lat: p.lat, lng: p.lng } : wgs84ToGcj02(p);
 }

@@ -3,7 +3,7 @@ import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
 import { Colors } from '@/constants/theme';
-import { chooseTiles, toTileCoord, type TileSource } from '@/geo/coord';
+import { CHINA_TILE_BOUNDS, chooseTiles, toTileCoord, type TileSource } from '@/geo/coord';
 import type { LatLng } from '@/geo/distance';
 import { LEAFLET_CSS, LEAFLET_JS } from '@/map/leafletAssets';
 
@@ -20,7 +20,9 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
-const TILES: Record<TileSource, { url: string; subdomains: string; attribution: string; maxZoom: number }> = {
+type TileLayer = { url: string; subdomains: string; attribution: string; maxZoom: number; bounds?: number[][] };
+
+const TILES: Record<'amap' | 'osm', TileLayer> = {
   amap: {
     url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
     subdomains: '1234',
@@ -35,8 +37,14 @@ const TILES: Record<TileSource, { url: string; subdomains: string; attribution: 
   },
 };
 
+const LAYERS: Record<TileSource, TileLayer[]> = {
+  amap: [TILES.amap],
+  osm: [TILES.osm],
+  mixed: [TILES.osm, { ...TILES.amap, bounds: CHINA_TILE_BOUNDS }],
+};
+
 function html(tiles: TileSource) {
-  const t = TILES[tiles];
+  const layers = LAYERS[tiles];
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <style>${LEAFLET_CSS}
 html,body,#map{margin:0;height:100%;background:#EFE8D8}
@@ -54,7 +62,9 @@ var map=L.map('map',{zoomControl:false,attributionControl:true,worldCopyJump:tru
   maxBounds:[[-85.0511,-1e4],[85.0511,1e4]],maxBoundsViscosity:1}).setView([35,110],4);
 function clampZoom(){var h=map.getSize().y;if(h>0)map.setMinZoom(Math.max(0,Math.ceil(Math.log2(h/256))))}
 clampZoom();map.on('resize',clampZoom);
-L.tileLayer(${JSON.stringify(t.url)},{subdomains:${JSON.stringify(t.subdomains)},maxZoom:${t.maxZoom},attribution:${JSON.stringify(t.attribution)}}).addTo(map);
+${JSON.stringify(layers)}.forEach(function(t){L.tileLayer(t.url,{subdomains:t.subdomains,maxZoom:t.maxZoom,bounds:t.bounds,attribution:t.attribution}).addTo(map)});
+// Stop at the shallowest layer so AMap never drops out inside China on mixed maps
+map.setMaxZoom(${Math.min(...layers.map((t) => t.maxZoom))});
 var layer=L.layerGroup().addTo(map),bounds=null,pad={top:40,right:40,bottom:40,left:40};
 function post(m){window.ReactNativeWebView.postMessage(JSON.stringify(m))}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}

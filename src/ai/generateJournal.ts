@@ -2,7 +2,8 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
 import { analyzePending } from './analyzePhotos';
 import { isUserTurn } from './chatContent';
-import { assertUsable, describeError, FALLBACK, getClient, MODEL } from './client';
+import { assertOAUsable, assertUsable, describeError, FALLBACK, getBackend, MODEL, type Backend } from './client';
+import { chatCompletion, jsonInstruction, parseJSONReply } from './openai';
 import { JournalSchema, type Journal } from './schemas';
 import { buildChatTranscript, buildTripContext } from './tripContext';
 import { getJournal, getTrip, listChat, listDays, listNotes, listPhotos, markIncluded, saveJournal, updateTrip } from '@/db/repo';
@@ -26,6 +27,32 @@ export function parseJournal(json: string | undefined | null): Journal | null {
   } catch {
     return null;
   }
+}
+
+async function writeJournal(backend: Backend, material: string): Promise<Journal | null> {
+  if (backend.kind === 'openai') {
+    const res = await chatCompletion(backend.cfg, {
+      model: backend.model,
+      max_tokens: 16000,
+      messages: [
+        { role: 'system', content: SYSTEM },
+        { role: 'user', content: `${material}\n\n${jsonInstruction(JournalSchema)}` },
+      ],
+    });
+    assertOAUsable(res.finishReason);
+    return parseJSONReply(JournalSchema, res.text);
+  }
+  const stream = backend.client.beta.messages.stream({
+    model: MODEL,
+    max_tokens: 32000,
+    ...FALLBACK,
+    system: SYSTEM,
+    output_config: { format: betaZodOutputFormat(JournalSchema) },
+    messages: [{ role: 'user', content: material }],
+  });
+  const res = await stream.finalMessage();
+  assertUsable(res.stop_reason);
+  return res.parsed_output;
 }
 
 export async function generateJournal(tripId: string) {
@@ -58,18 +85,7 @@ export async function generateJournal(tripId: string) {
       parts.push('请根据以上素材写出完整游记。');
     }
 
-    const client = await getClient();
-    const stream = client.beta.messages.stream({
-      model: MODEL,
-      max_tokens: 32000,
-      ...FALLBACK,
-      system: SYSTEM,
-      output_config: { format: betaZodOutputFormat(JournalSchema) },
-      messages: [{ role: 'user', content: parts.join('\n\n') }],
-    });
-    const res = await stream.finalMessage();
-    assertUsable(res.stop_reason);
-    const journal = res.parsed_output;
+    const journal = await writeJournal(await getBackend(), parts.join('\n\n'));
     if (!journal) throw new Error('游记格式解析失败，请重试');
 
     // Drop hallucinated or duplicate photo ids
