@@ -11,6 +11,7 @@ import { describeError } from '@/ai/client';
 import { parseJournal } from '@/ai/generateJournal';
 import { Button, Card, Display, Segmented } from '@/components/common/ui';
 import { cardSpecs, LongImage, XhsCard, type ShareData } from '@/components/share/ShareViews';
+import { formatTags } from '@/components/trip/JournalEdit';
 import { Colors } from '@/constants/theme';
 import { getJournal, getTrip, listPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
@@ -51,7 +52,7 @@ export default function ShareScreen() {
     );
   }
   const cardW = screenW - 90;
-  const tags = journal.xhs.tags.map((t) => `#${t}`).join(' ');
+  const tags = formatTags(journal.xhs.tags);
   const caption = `${journal.xhs.title}\n\n${journal.xhs.body}\n\n${tags}`;
 
   const captureAll = async () => {

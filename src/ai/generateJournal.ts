@@ -79,7 +79,7 @@ export async function generateJournal(tripId: string) {
         ...chats.filter((c) => c.journal_included_at == null && isUserTurn(c)).length ? ['新的搭子对话'] : [],
       ];
       parts.push(`<existing_journal>\n${JSON.stringify(existing)}\n</existing_journal>`);
-      parts.push(`这是更新：已有游记里的段落尽量保留原文和风格，把新增素材（${fresh.join('、') || '无'}）写进对应的日期和小节，必要时新增小节或调整衔接，输出完整的新版游记。`);
+      parts.push(`这是更新：已有游记可能被用户亲手改过，其中的标题、概述、小标题、段落和小红书文案保留原文，只在衔接新内容时做最小改动；用户删掉的小节和照片不要再加回来。把新增素材（${fresh.join('、') || '无'}）写进对应的日期和小节，必要时新增小节，输出完整的新版游记。`);
     } else {
       parts.push('请根据以上素材写出完整游记。');
     }

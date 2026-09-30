@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, t
 import Svg, { Path } from 'react-native-svg';
 
 import { ICON_PATHS, type IconName } from '@/components/common/icons';
+import { Pulse } from '@/components/common/Working';
 import { Colors, Type } from '@/constants/theme';
 
 export type { IconName };
@@ -45,20 +46,27 @@ export function Serif({ style, children, numberOfLines }: TextProps) {
   );
 }
 
-export function Chip({ icon, iconColor, label, tone = 'plain' }: { icon?: IconName; iconColor?: string; label: string; tone?: 'plain' | 'teal' | 'accent' }) {
+// `busy` animates the icon while the chip reports work in progress
+export function Chip({ icon, iconColor, label, tone = 'plain', busy }: { icon?: IconName; iconColor?: string; label: string; tone?: 'plain' | 'teal' | 'accent'; busy?: boolean }) {
   const bg = tone === 'teal' ? Colors.tealSoft : tone === 'accent' ? Colors.accentSoft : Colors.chip;
   const fg = tone === 'teal' ? Colors.teal : tone === 'accent' ? Colors.accent : Colors.ink;
   return (
     <View style={[styles.chip, { backgroundColor: bg }]}>
-      {icon ? <Icon name={icon} size={13} color={iconColor ?? fg} /> : null}
+      {icon ? (
+        <Pulse active={!!busy}>
+          <Icon name={icon} size={13} color={iconColor ?? fg} />
+        </Pulse>
+      ) : null}
       <Text style={[styles.chipText, { color: fg }]}>{label}</Text>
     </View>
   );
 }
 
-type ButtonProps = {
+export type ButtonProps = {
   label: string;
   icon?: IconName;
+  // Drawn in place of `icon`, for pictures that aren't icons (e.g. the buddy's avatar)
+  leading?: ReactNode;
   onPress: () => void;
   kind?: 'primary' | 'secondary';
   loading?: boolean;
@@ -67,7 +75,7 @@ type ButtonProps = {
   compact?: boolean;
 };
 
-export function Button({ label, icon, onPress, kind = 'primary', loading, disabled, style, compact }: ButtonProps) {
+export function Button({ label, icon, leading, onPress, kind = 'primary', loading, disabled, style, compact }: ButtonProps) {
   const primary = kind === 'primary';
   const color = primary ? Colors.onDark : Colors.ink;
   return (
@@ -82,7 +90,7 @@ export function Button({ label, icon, onPress, kind = 'primary', loading, disabl
         (pressed || disabled) && { opacity: 0.6 },
         style,
       ]}>
-      {loading ? <ActivityIndicator color={color} /> : icon ? <Icon name={icon} size={compact ? 15 : 18} color={color} /> : null}
+      {loading ? <ActivityIndicator color={color} /> : leading ?? (icon ? <Icon name={icon} size={compact ? 15 : 18} color={color} /> : null)}
       <Text style={[styles.buttonText, compact && { fontSize: 13 }, { color }]}>{label}</Text>
     </Pressable>
   );

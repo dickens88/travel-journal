@@ -1,12 +1,14 @@
 import { router } from 'expo-router';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Card, Chip, Icon, Serif } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { deleteNote } from '@/db/repo';
 import type { Photo } from '@/db/types';
-import { cameraSummary, formatCoord, photoExif } from '@/photos/describe';
+import { cameraSummary, photoExif } from '@/photos/describe';
+import { useSettings } from '@/settings/settings';
 import { photoAnalysis } from '@/trip/derive';
 import type { FeedItem } from '@/trip/feed';
 import type { TripJobs } from '@/trip/jobs';
@@ -44,11 +46,10 @@ function PhotoStrip({ photos, tripId }: { photos: Photo[]; tripId: string }) {
   );
 }
 
-function PhotoMeta({ photos, places }: { photos: Photo[]; places: string[] }) {
+// Country and city rather than coordinates; spot names only when the area is still unknown
+function PhotoMeta({ photos, area, places }: { photos: Photo[]; area: string | null; places: string[] }) {
   const located = photos.filter((p) => p.lat != null);
-  const first = located[0];
-  let where = places.slice(0, 3).join('、');
-  if (!where && first) where = formatCoord(first.lat!, first.lng!);
+  let where = area ?? places.slice(0, 2).join('、');
   if (where && located.length && located.every((p) => p.loc_estimated)) where = `约 ${where}`;
   const missing = photos.length - located.length;
 
@@ -64,7 +65,7 @@ function PhotoMeta({ photos, places }: { photos: Photo[]; places: string[] }) {
       <View style={styles.metaRow}>
         <Icon name="pin" size={13} color={where ? Colors.accent : Colors.muted} duo={null} />
         <Text style={[styles.sub, { flex: 1 }]} numberOfLines={1}>
-          {where || '没有读取到位置信息'}
+          {where || (located.length ? '地点待识别' : '没有读取到位置信息')}
           {where && missing ? ` · ${missing} 张无定位` : ''}
         </Text>
       </View>
@@ -78,7 +79,7 @@ function PhotosCard({ item, jobs, tripId }: { item: Extract<FeedItem, { kind: 'p
   const unanalyzed = item.photos.filter((p) => !p.analysis_json).length;
   const included = item.photos.every((p) => p.journal_included_at != null);
   let chip = null;
-  if (unanalyzed && jobs.analyzing) chip = <Chip tone="accent" icon="sparkle" label={`识别中 ${item.photos.length - unanalyzed}/${item.photos.length}`} />;
+  if (unanalyzed && jobs.analyzing) chip = <Chip tone="accent" icon="sparkle" busy label={`识别中 ${item.photos.length - unanalyzed}/${item.photos.length}`} />;
   else if (unanalyzed)
     chip = (
       <Pressable onPress={() => recognizePhotos(tripId)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`识别 ${unanalyzed} 张照片`}>
@@ -94,7 +95,7 @@ function PhotosCard({ item, jobs, tripId }: { item: Extract<FeedItem, { kind: 'p
         {chip}
       </View>
       <PhotoStrip photos={item.photos} tripId={tripId} />
-      <PhotoMeta photos={item.photos} places={item.places} />
+      <PhotoMeta photos={item.photos} area={item.area} places={item.places} />
     </Card>
   );
 }
@@ -123,12 +124,13 @@ function NoteCard({ item }: { item: Extract<FeedItem, { kind: 'note' }> }) {
 }
 
 function ChatCard({ item, tripId, photos }: { item: Extract<FeedItem, { kind: 'chat' }>; tripId: string; photos: Map<string, Photo> }) {
+  const { buddyAvatar } = useSettings();
   const photo = item.photoId ? photos.get(item.photoId) : undefined;
   return (
     <Pressable onPress={() => router.push(`/trip/${tripId}/buddy`)} accessibilityRole="button">
       <Card style={{ gap: 8 }}>
         <View style={styles.headRow}>
-          <Icon name="chat" size={20} color={Colors.teal} />
+          <BuddyAvatar value={buddyAvatar} size={22} />
           <Text style={[styles.headText, { color: Colors.teal, fontSize: 13 }]}>和搭子聊了 {Math.max(item.turns, 1)} 轮</Text>
           <Icon name="next" size={14} color={Colors.muted} duo={null} />
         </View>

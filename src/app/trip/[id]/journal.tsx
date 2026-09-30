@@ -1,12 +1,14 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { parseJournal } from '@/ai/generateJournal';
 import type { Journal } from '@/ai/schemas';
+import { AskBuddyButton } from '@/components/buddy/AskBuddyButton';
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Button, Display, Icon, Serif, type IconName } from '@/components/common/ui';
+import { EditBox, EditPhotos, XhsEditor } from '@/components/trip/JournalEdit';
 import { JournalPhotos } from '@/components/trip/JournalPhotos';
 import { JournalStatusCard } from '@/components/trip/JournalStatusCard';
 import { StatsCard } from '@/components/trip/StatsCard';
@@ -22,6 +24,8 @@ import { formatDayLabel, formatTripRange, tripDayNumber } from '@/utils/time';
 
 const TRANSPORT_ICON: Record<string, IconName> = { walk: 'walk', transit: 'bus', flight: 'flight' };
 
+type Section = Journal['days'][number]['sections'][number];
+
 export default function JournalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
@@ -36,6 +40,18 @@ export default function JournalScreen() {
   const { stops, stats } = useMemo(() => deriveTrip(photos), [photos]);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const stopByPhoto = useMemo(() => new Map(stops.flatMap((s) => s.photoIds.map((pid) => [pid, s] as const))), [stops]);
+
+  // Leaving the page mid-edit keeps what was typed
+  const latestDraft = useRef<Journal | null>(null);
+  useEffect(() => {
+    latestDraft.current = draft;
+  }, [draft]);
+  useEffect(
+    () => () => {
+      if (latestDraft.current) saveJournal(id, latestDraft.current);
+    },
+    [id],
+  );
 
   if (!trip) return null;
   const journal = draft ?? saved;
@@ -53,13 +69,27 @@ export default function JournalScreen() {
     }
   };
 
-  const editSection = (d: number, s: number, text: string) => {
-    if (!draft) return;
-    setDraft({
-      ...draft,
-      days: draft.days.map((day, i) => (i !== d ? day : { ...day, sections: day.sections.map((sec, j) => (j !== s ? sec : { ...sec, text })) })),
-    });
-  };
+  const edit = (patch: Partial<Journal>) => setDraft((j) => j && { ...j, ...patch });
+
+  // `null` deletes the section, and the day with it once it has none left
+  const editSection = (d: number, s: number, patch: Partial<Section> | null) =>
+    setDraft(
+      (j) =>
+        j && {
+          ...j,
+          days: j.days
+            .map((day, i) =>
+              i !== d ? day : { ...day, sections: patch ? day.sections.map((sec, k) => (k !== s ? sec : { ...sec, ...patch })) : day.sections.filter((_, k) => k !== s) },
+            )
+            .filter((day) => day.sections.length),
+        },
+    );
+
+  const deleteSection = (d: number, s: number, heading: string) =>
+    Alert.alert('删除这一节？', heading ? `「${heading}」的文字会从游记里去掉，照片还在旅行里。` : undefined, [
+      { text: '取消', style: 'cancel' },
+      { text: '删除', style: 'destructive', onPress: () => editSection(d, s, null) },
+    ]);
 
   return (
     <View style={styles.screen}>
@@ -72,9 +102,9 @@ export default function JournalScreen() {
               <Icon name="back" size={20} />
             </Pressable>
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              {journal ? (
-                <Pressable style={[styles.round, { width: 'auto', paddingHorizontal: 14 }]} onPress={toggleEdit} accessibilityRole="button">
-                  <Text style={{ fontSize: 14, fontWeight: '600' }}>{editing ? '完成' : '编辑'}</Text>
+              {journal && !jobs.generating ? (
+                <Pressable style={[styles.round, { width: 'auto', paddingHorizontal: 14 }, editing && { backgroundColor: Colors.accent }]} onPress={toggleEdit} accessibilityRole="button">
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: editing ? Colors.onDark : Colors.ink }}>{editing ? '完成' : '编辑'}</Text>
                 </Pressable>
               ) : null}
               <Pressable style={styles.round} onPress={() => router.push(`/trip/${id}/share`)} accessibilityLabel="分享">
@@ -87,14 +117,27 @@ export default function JournalScreen() {
               {formatTripRange(trip.start_date, trip.end_date)}
               {cities ? ` · ${cities}` : ''}
             </Text>
-            <Display variant="title" style={{ color: Colors.onDark, fontSize: 30, lineHeight: 40 }}>{journal?.title ?? trip.title}</Display>
+            {editing ? (
+              <TextInput value={draft.title} onChangeText={(title) => edit({ title })} placeholder="游记标题" placeholderTextColor="rgba(255,253,248,0.6)" style={styles.titleEdit} accessibilityLabel="游记标题" />
+            ) : (
+              <Display variant="title" style={{ color: Colors.onDark, fontSize: 30, lineHeight: 40 }}>{journal?.title ?? trip.title}</Display>
+            )}
           </View>
         </View>
         <TripTabs tripId={id} active="journal" />
         <View style={styles.body}>
           <StatsCard stats={stats} />
-          <JournalStatusCard tripId={id} hasJournal={!!journal} hasPhotos={photos.length > 0} pending={pending} jobs={jobs} />
-          {journal?.summary ? <Serif style={styles.summary}>{journal.summary}</Serif> : null}
+          {/* Regenerating mid-edit would be overwritten by the draft on 完成 */}
+          {editing ? (
+            <Text style={styles.muted}>点文字直接修改，改完点右上角「完成」。重新生成游记时会尽量保留你改过的内容。</Text>
+          ) : (
+            <JournalStatusCard tripId={id} hasJournal={!!journal} hasPhotos={photos.length > 0} pending={pending} jobs={jobs} />
+          )}
+          {editing ? (
+            <EditBox value={draft.summary} onChangeText={(summary) => edit({ summary })} placeholder="全程概述" style={styles.summary} />
+          ) : journal?.summary ? (
+            <Serif style={styles.summary}>{journal.summary}</Serif>
+          ) : null}
           {journal?.days.map((day, di) => {
             const n = tripDayNumber(trip.start_date, day.date);
             return (
@@ -118,14 +161,28 @@ export default function JournalScreen() {
                         <View style={styles.dot}>
                           <Text style={styles.dotText}>{si + 1}</Text>
                         </View>
-                        <Display variant="subheading" style={{ flex: 1 }}>{sec.heading}</Display>
+                        {editing ? (
+                          <>
+                            <EditBox value={sec.heading} onChangeText={(heading) => editSection(di, si, { heading })} placeholder="小标题" multiline={false} style={styles.headingEdit} />
+                            <Pressable onPress={() => deleteSection(di, si, sec.heading)} hitSlop={8} accessibilityRole="button" accessibilityLabel="删除这一节">
+                              <Text style={styles.delete}>删除</Text>
+                            </Pressable>
+                          </>
+                        ) : (
+                          <Display variant="subheading" style={{ flex: 1 }}>{sec.heading}</Display>
+                        )}
                       </View>
                       {editing ? (
-                        <TextInput multiline value={sec.text} onChangeText={(t) => editSection(di, si, t)} style={[styles.para, styles.paraEdit]} />
+                        <>
+                          <EditBox value={sec.text} onChangeText={(text) => editSection(di, si, { text })} style={styles.para} />
+                          <EditPhotos photos={secPhotos} onRemove={(pid) => editSection(di, si, { photo_ids: sec.photo_ids.filter((x) => x !== pid) })} />
+                        </>
                       ) : (
-                        <Serif style={styles.para}>{sec.text}</Serif>
+                        <>
+                          <Serif style={styles.para}>{sec.text}</Serif>
+                          <JournalPhotos photos={secPhotos} />
+                        </>
                       )}
-                      <JournalPhotos photos={secPhotos} />
                       {leg ? (
                         <View style={styles.leg}>
                           <View style={styles.legLine} />
@@ -141,10 +198,11 @@ export default function JournalScreen() {
               </View>
             );
           })}
+          {editing ? <XhsEditor xhs={draft.xhs} onChange={(xhs) => edit({ xhs })} /> : null}
         </View>
       </ScrollView>
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
-        <Button kind="secondary" label="问搭子" icon="chat" onPress={() => router.push(`/trip/${id}/buddy`)} style={{ flex: 1 }} />
+        <AskBuddyButton kind="secondary" onPress={() => router.push(`/trip/${id}/buddy`)} style={{ flex: 1 }} />
         <Button label="分享游记" icon="share" onPress={() => router.push(`/trip/${id}/share`)} style={{ flex: 1 }} disabled={!journal} />
       </View>
     </View>
@@ -166,7 +224,9 @@ const styles = StyleSheet.create({
   dot: { width: 26, height: 26, borderRadius: 13, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center' },
   dotText: { fontFamily: Fonts.display, color: Colors.onDark, fontSize: 14 },
   para: { fontSize: 16, lineHeight: 30 },
-  paraEdit: { fontFamily: Fonts.serif, color: Colors.ink, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: Colors.line, backgroundColor: Colors.card },
+  titleEdit: { fontFamily: Fonts.display, color: Colors.onDark, fontSize: 28, paddingVertical: 4, borderBottomWidth: 1.5, borderBottomColor: 'rgba(255,253,248,0.7)' },
+  headingEdit: { flex: 1, fontFamily: Fonts.display, fontSize: 18, lineHeight: 24, paddingVertical: 6, paddingHorizontal: 10 },
+  delete: { fontSize: 13, color: Colors.accent, fontWeight: '600' },
   leg: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12 },
   legLine: { width: 2, height: 36, borderRadius: 1, backgroundColor: Colors.tealSoft },
   bar: {

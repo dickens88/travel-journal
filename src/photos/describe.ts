@@ -23,10 +23,20 @@ export function photoPlace(p: Photo) {
   return p.place_name || a?.place || a?.city || null;
 }
 
+// "挪威 · 奥斯陆": country and city from the geocoder, else from the photo analysis; null when neither knows
+export function photoArea(p: Photo) {
+  // Skip parsing the analysis when the geocoder already knows both
+  const a = p.country && p.city ? null : photoAnalysis(p);
+  const country = p.country ?? a?.country;
+  const city = p.city ?? a?.city ?? p.region ?? a?.region;
+  const parts = [country, city].filter(Boolean) as string[];
+  return parts.length ? [...new Set(parts)].join(' · ') : null;
+}
+
 // Where the photo was taken, for a one-line label; null when there's no position at all
 export function locationLabel(p: Photo) {
   if (p.lat == null || p.lng == null) return null;
-  const name = photoPlace(p) ?? formatCoord(p.lat, p.lng);
+  const name = photoPlace(p) ?? photoArea(p) ?? formatCoord(p.lat, p.lng);
   return p.loc_estimated ? `约 ${name}` : name;
 }
 

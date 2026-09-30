@@ -1,11 +1,12 @@
 import { blocksOf, isUserTurn, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import type { ChatRow, Note, Photo } from '@/db/types';
-import { photoPlace } from '@/photos/describe';
+import { haversineKm } from '@/geo/distance';
+import { photoArea, photoPlace } from '@/photos/describe';
 import { stripMarkdown } from '@/utils/markdown';
 import { localParts } from '@/utils/time';
 
 export type FeedItem =
-  | { kind: 'photos'; key: string; time: number; hm: string; photos: Photo[]; places: string[] }
+  | { kind: 'photos'; key: string; time: number; hm: string; photos: Photo[]; area: string | null; places: string[] }
   | { kind: 'note'; key: string; time: number; hm: string; note: Note }
   | {
       kind: 'chat';
@@ -22,12 +23,47 @@ export type FeedItem =
     };
 
 export type FeedDay = { date: string; items: FeedItem[] };
+export type PhotoGroup = { date: string; area: string | null; photos: Photo[] };
 
 const SESSION_GAP_MS = 30 * 60_000;
+// Photos with no known city still start a new card when they are this far from the previous shot
+const UNNAMED_SPLIT_KM = 30;
 
 // Local day a photo belongs to in the feed: shot time at its own offset, else when it was added
-export function photoDate(p: Photo) {
+function photoDate(p: Photo) {
   return localParts(p.taken_at ?? p.added_at, p.taken_at != null ? p.offset_min : undefined).date;
+}
+
+// Distance between two shots; 0 when either has no position
+function apartKm(a: Photo, b: Photo) {
+  if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return 0;
+  return haversineKm({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng });
+}
+
+// Feed cards for photos: each upload, split by local day, then into runs of consecutive shots in the same city
+// (or, while the city is unknown, near each other). Expects photos in shot order, as listPhotos returns them.
+export function photoGroups(photos: Photo[]): PhotoGroup[] {
+  const batches = new Map<string, { date: string; photos: Photo[] }>();
+  for (const p of photos) {
+    const date = photoDate(p);
+    const key = `${p.batch_id}|${date}`;
+    if (!batches.has(key)) batches.set(key, { date, photos: [] });
+    batches.get(key)!.photos.push(p);
+  }
+  const groups: PhotoGroup[] = [];
+  for (const batch of batches.values()) {
+    let run: PhotoGroup | null = null;
+    for (const p of batch.photos) {
+      const area = photoArea(p);
+      const prev = run?.photos[run.photos.length - 1];
+      if (!run || run.area !== area || (!area && prev && apartKm(prev, p) > UNNAMED_SPLIT_KM)) {
+        run = { date: batch.date, area, photos: [] };
+        groups.push(run);
+      }
+      run.photos.push(p);
+    }
+  }
+  return groups;
 }
 
 export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): FeedDay[] {
@@ -37,18 +73,12 @@ export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): Fee
     byDay.get(date)!.push(item);
   };
 
-  const batches = new Map<string, { date: string; photos: Photo[] }>();
-  for (const p of photos) {
-    const date = photoDate(p);
-    const key = `${p.batch_id}|${date}`;
-    if (!batches.has(key)) batches.set(key, { date, photos: [] });
-    batches.get(key)!.photos.push(p);
-  }
-  for (const [key, b] of batches) {
-    const first = b.photos[0];
+  for (const g of photoGroups(photos)) {
+    const first = g.photos[0];
     const t = first.taken_at ?? first.added_at;
-    const places = [...new Set(b.photos.map(photoPlace).filter(Boolean) as string[])];
-    push(b.date, { kind: 'photos', key, time: t, hm: localParts(t, first.taken_at != null ? first.offset_min : undefined).hm, photos: b.photos, places });
+    const places = [...new Set(g.photos.map(photoPlace).filter(Boolean) as string[])];
+    const hm = localParts(t, first.taken_at != null ? first.offset_min : undefined).hm;
+    push(g.date, { kind: 'photos', key: `photos-${first.id}`, time: t, hm, photos: g.photos, area: g.area, places });
   }
 
   for (const n of notes) {

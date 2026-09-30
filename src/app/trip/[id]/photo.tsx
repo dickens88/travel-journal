@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AskBuddyButton } from '@/components/buddy/AskBuddyButton';
+import { Dots } from '@/components/buddy/TypingDots';
 import { Button, Icon } from '@/components/common/ui';
+import { Pulse, ScanSweep } from '@/components/common/Working';
 import { LeafletMap } from '@/components/map/LeafletMap';
 import { Colors } from '@/constants/theme';
 import { listPhotos } from '@/db/repo';
@@ -14,7 +17,7 @@ import { locationLabel, photoDetails } from '@/photos/describe';
 import { nameLocation } from '@/photos/importPhotos';
 import { photoUri } from '@/photos/storage';
 import { photoAnalysis } from '@/trip/derive';
-import { photoDate } from '@/trip/feed';
+import { photoGroups } from '@/trip/feed';
 import { useJobs } from '@/trip/jobs';
 import { recognizePhotos } from '@/trip/recognize';
 
@@ -24,13 +27,8 @@ export default function PhotoViewer() {
   const { width } = useWindowDimensions();
   const all = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const jobs = useJobs(id);
-  // Page through the photos of the tapped feed card: same import batch, same day
-  const photos = useMemo(() => {
-    const start = all.find((p) => p.id === photo);
-    if (!start) return [];
-    const date = photoDate(start);
-    return all.filter((p) => p.batch_id === start.batch_id && photoDate(p) === date);
-  }, [all, photo]);
+  // Page through the photos of the tapped feed card
+  const photos = useMemo(() => photoGroups(all).find((g) => g.photos.some((p) => p.id === photo))?.photos ?? [], [all, photo]);
   const [index, setIndex] = useState(() => Math.max(0, photos.findIndex((p) => p.id === photo)));
   const [immersive, setImmersive] = useState(false);
   const [pageHeight, setPageHeight] = useState(0);
@@ -47,6 +45,7 @@ export default function PhotoViewer() {
   const caption = photoAnalysis(current)?.caption;
   const details = photoDetails(current);
   const located = current.lat != null && current.lng != null;
+  const scanning = !!jobs.analyzing && !current.analysis_json;
   // One tap: the buddy describes the scene; the other attaches the photo and waits for the user's question
   const askBuddy = (ask?: 'describe') =>
     router.push({ pathname: '/trip/[id]/buddy', params: { id, photo: current.id, ...(ask ? { ask } : {}) } });
@@ -54,7 +53,7 @@ export default function PhotoViewer() {
   return (
     <View style={styles.screen}>
       <StatusBar style="light" hidden={immersive} />
-      <View style={{ flex: 1 }} onLayout={(e) => setPageHeight(e.nativeEvent.layout.height)}>
+      <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setPageHeight(e.nativeEvent.layout.height)}>
         {pageHeight ? (
           <FlatList
             data={photos}
@@ -72,6 +71,7 @@ export default function PhotoViewer() {
             )}
           />
         ) : null}
+        {scanning && pageHeight ? <ScanSweep height={pageHeight} /> : null}
       </View>
 
       {immersive ? null : (
@@ -91,11 +91,15 @@ export default function PhotoViewer() {
               {caption ? <Text style={styles.caption}>{caption}</Text> : null}
               {!current.analysis_json ? (
                 <View style={styles.recognize}>
-                  <Icon name="sparkle" size={14} color={Colors.pop} duo={null} />
+                  <Pulse active={!!jobs.analyzing}>
+                    <Icon name="sparkle" size={14} color={Colors.pop} duo={null} />
+                  </Pulse>
                   <Text style={styles.recognizeText} numberOfLines={3}>
                     {jobs.analyzing ? `正在识别画面 ${jobs.analyzing.done}/${jobs.analyzing.total}` : jobs.error ? `${jobs.error.title}：${jobs.error.message}` : '还没识别画面内容'}
                   </Text>
-                  {jobs.analyzing ? null : (
+                  {jobs.analyzing ? (
+                    <Dots size={5} />
+                  ) : (
                     <Pressable onPress={() => recognizePhotos(id)} hitSlop={8} accessibilityRole="button">
                       <Text style={styles.recognizeBtn}>{jobs.error ? '重试' : '识别'}</Text>
                     </Pressable>
@@ -122,7 +126,7 @@ export default function PhotoViewer() {
             {/* Pinned below the details so the buddy actions stay in reach */}
             <View style={[styles.actions, { paddingBottom: insets.bottom + 12 }]}>
               <Button compact icon="sparkle" label="让搭子讲讲" onPress={() => askBuddy('describe')} style={{ flex: 1 }} />
-              <Button compact kind="secondary" icon="chat" label="问搭子" onPress={() => askBuddy()} style={{ flex: 1 }} />
+              <AskBuddyButton compact kind="secondary" onPress={() => askBuddy()} style={{ flex: 1 }} />
             </View>
           </View>
         </>

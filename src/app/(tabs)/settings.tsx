@@ -1,5 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
-import { useState, type ComponentProps, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -7,6 +7,7 @@ import { BUDDY_PROMPT } from '@/ai/chat';
 import { CLAUDE_MODELS, claudeBase, claudeEffort, DEFAULT_MODEL, describeError, getBackend } from '@/ai/client';
 import { chatCompletion } from '@/ai/openai';
 import { AVATAR_PRESETS, BuddyAvatar } from '@/components/buddy/BuddyAvatar';
+import { toast } from '@/components/common/Toast';
 import { Button, Card, Display, Icon, Segmented } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { avatarPhotoFile, deleteAvatarPhoto, pickAvatarPhoto } from '@/settings/avatar';
@@ -33,8 +34,7 @@ function SettingsForm() {
       <ScrollView style={{ backgroundColor: Colors.paper }} contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100, paddingHorizontal: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
         <Display variant="hero" marker>设置</Display>
         <ModelCard />
-        <AvatarCard />
-        <PromptCard />
+        <BuddyCard />
         <Card style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 15, color: Colors.ink }}>自动朗读搭子的回复</Text>
@@ -114,6 +114,7 @@ function ModelCard() {
     openaiVisionBaseURL: settings.openaiVisionBaseURL,
   }));
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const set = (patch: Partial<ModelFields>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -122,8 +123,18 @@ function ModelCard() {
   const save = async () => {
     const trimmed = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v.trim()])) as ModelFields;
     setForm(trimmed);
-    await saveSettings(trimmed);
-    setStatus({ ok: true, text: '已保存' });
+    // A test result from before describes the old values
+    setStatus(null);
+    setSaving(true);
+    try {
+      await saveSettings(trimmed);
+      toast('已保存');
+    } catch (e) {
+      toast(`保存失败：${e instanceof Error ? e.message : String(e)}`, false);
+      throw e;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const test = async () => {
@@ -218,8 +229,8 @@ function ModelCard() {
       )}
       <Text style={styles.hint}>照片会压缩后发送给模型识别内容，其余数据只保存在这台手机上。</Text>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Button kind="secondary" label={dirty ? '保存' : '已保存'} onPress={save} disabled={!dirty} style={{ flex: 1 }} />
-        <Button label="测试连接" onPress={test} loading={testing} style={{ flex: 1 }} />
+        <Button kind="secondary" label={saving ? '保存中' : dirty ? '保存' : '已保存'} onPress={() => save().catch(() => {})} loading={saving} disabled={!dirty || testing} style={{ flex: 1 }} />
+        <Button label="测试连接" onPress={test} loading={testing} disabled={saving} style={{ flex: 1 }} />
       </View>
       {status ? <Text style={[styles.hint, { color: status.ok ? Colors.teal : Colors.accent }]}>{status.text}</Text> : null}
     </Card>
@@ -283,23 +294,35 @@ function AvatarTile({ on, label, onPress, children }: { on: boolean; label: stri
   );
 }
 
-function AvatarCard() {
-  const { buddyAvatar } = useSettings();
+// Avatar and prompt are edited together and saved with one button
+function BuddyCard() {
+  const settings = useSettings();
+  const [avatar, setAvatar] = useState(settings.buddyAvatar);
+  const [prompt, setPrompt] = useState(settings.buddyPrompt || BUDDY_PROMPT);
   const [uploading, setUploading] = useState(false);
-  const photo = avatarPhotoFile(buddyAvatar);
+  const [saving, setSaving] = useState(false);
+  const photo = avatarPhotoFile(avatar);
 
-  // Only one uploaded picture is kept; switching away from it removes the file
-  const choose = async (value: string) => {
-    if (value === buddyAvatar) return;
-    await saveSettings({ buddyAvatar: value });
-    deleteAvatarPhoto(buddyAvatar);
+  // The default prompt is stored as empty so later app updates to it still reach the user
+  const promptValue = prompt.trim() === BUDDY_PROMPT ? '' : prompt.trim();
+  const dirty = avatar !== settings.buddyAvatar || promptValue !== settings.buddyPrompt;
+
+  // An uploaded picture that was never saved has no other owner; drop it when it is replaced or left behind
+  const unsaved = useRef('');
+  useEffect(() => () => deleteAvatarPhoto(unsaved.current), []);
+
+  const choose = (value: string) => {
+    if (value === avatar) return;
+    deleteAvatarPhoto(unsaved.current);
+    setAvatar(value);
+    unsaved.current = value === settings.buddyAvatar ? '' : value;
   };
 
   const upload = async () => {
     setUploading(true);
     try {
       const value = await pickAvatarPhoto();
-      if (value) await choose(value);
+      if (value) choose(value);
     } catch (e) {
       Alert.alert('头像没能换成', e instanceof Error ? e.message : String(e));
     } finally {
@@ -307,27 +330,46 @@ function AvatarCard() {
     }
   };
 
+  const save = async () => {
+    if (!prompt.trim()) return toast('提示词不能为空，可以点「恢复默认」', false);
+    const old = settings.buddyAvatar;
+    setSaving(true);
+    try {
+      await saveSettings({ buddyAvatar: avatar, buddyPrompt: promptValue });
+    } catch (e) {
+      return toast(`保存失败：${e instanceof Error ? e.message : String(e)}`, false);
+    } finally {
+      setSaving(false);
+    }
+    unsaved.current = '';
+    // Only one uploaded picture is kept; switching away from it removes the file
+    if (old !== avatar) deleteAvatarPhoto(old);
+    setPrompt(promptValue || BUDDY_PROMPT);
+    toast('已保存，下一条消息开始生效');
+  };
+
   return (
     <Card style={{ gap: 12 }}>
       <View style={styles.row}>
-        <BuddyAvatar value={buddyAvatar} size={48} />
+        <BuddyAvatar value={avatar} size={48} />
         <View style={{ flex: 1 }}>
-          <Display variant="subheading">搭子头像</Display>
-          <Text style={styles.hint}>挑一只小动物，或者上传一张自己喜欢的图</Text>
+          <Display variant="subheading">旅行搭子</Display>
+          <Text style={styles.hint}>搭子的头像和性格，改完点下面的「保存」</Text>
         </View>
       </View>
+      <Text style={styles.label}>头像：挑一只小动物，或者上传一张自己喜欢的图</Text>
       <View style={styles.tiles}>
-        <AvatarTile on={!buddyAvatar} label="默认" onPress={() => choose('')}>
+        <AvatarTile on={!avatar} label="默认" onPress={() => choose('')}>
           <BuddyAvatar value="" size={52} />
         </AvatarTile>
         {AVATAR_PRESETS.map((p) => (
-          <AvatarTile key={p.id} on={buddyAvatar === p.id} label={p.label} onPress={() => choose(p.id)}>
+          <AvatarTile key={p.id} on={avatar === p.id} label={p.label} onPress={() => choose(p.id)}>
             <BuddyAvatar value={p.id} size={52} />
           </AvatarTile>
         ))}
         <AvatarTile on={!!photo} label={uploading ? '处理中…' : photo ? '换一张' : '上传'} onPress={() => !uploading && upload()}>
           {photo ? (
-            <BuddyAvatar value={buddyAvatar} size={52} />
+            <BuddyAvatar value={avatar} size={52} />
           ) : (
             <View style={styles.upload}>
               <Icon name="addPhoto" size={24} />
@@ -335,46 +377,27 @@ function AvatarCard() {
           )}
         </AvatarTile>
       </View>
-    </Card>
-  );
-}
-
-function PromptCard() {
-  const settings = useSettings();
-  const saved = settings.buddyPrompt || BUDDY_PROMPT;
-  const [prompt, setPrompt] = useState(saved);
-  const [status, setStatus] = useState<Status>(null);
-
-  // The default is stored as empty so later app updates to it still reach the user
-  const save = async (text: string) => {
-    const t = text.trim();
-    if (!t) return setStatus({ ok: false, text: '提示词不能为空，可以点「恢复默认」' });
-    const value = t === BUDDY_PROMPT ? '' : t;
-    await saveSettings({ buddyPrompt: value });
-    setPrompt(value || BUDDY_PROMPT);
-    setStatus({ ok: true, text: value ? '已保存，下一条消息开始生效' : '已恢复默认' });
-  };
-
-  return (
-    <Card style={{ gap: 12 }}>
-      <Display variant="subheading">搭子提示词</Display>
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>提示词</Text>
+        {promptValue ? (
+          <Text
+            style={[styles.label, { color: Colors.teal }]}
+            onPress={() => setPrompt(BUDDY_PROMPT)}
+            suppressHighlighting>
+            恢复默认
+          </Text>
+        ) : null}
+      </View>
       <Text style={styles.hint}>决定旅行搭子的性格、语气和回答方式。旅行素材和当前时间会自动附在后面，记随手记的功能一直可用。</Text>
       <TextInput
         value={prompt}
-        onChangeText={(v) => {
-          setPrompt(v);
-          setStatus(null);
-        }}
+        onChangeText={setPrompt}
         multiline
         textAlignVertical="top"
         autoCorrect={false}
         style={[styles.input, styles.prompt]}
       />
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Button kind="secondary" label="恢复默认" onPress={() => save(BUDDY_PROMPT)} disabled={!settings.buddyPrompt && prompt === BUDDY_PROMPT} style={{ flex: 1 }} />
-        <Button label={prompt === saved ? '已保存' : '保存'} onPress={() => save(prompt)} disabled={prompt === saved} style={{ flex: 1 }} />
-      </View>
-      {status ? <Text style={[styles.hint, { color: status.ok ? Colors.teal : Colors.accent }]}>{status.text}</Text> : null}
+      <Button label={saving ? '保存中' : dirty ? '保存' : '已保存'} onPress={save} loading={saving} disabled={!dirty || uploading} />
     </Card>
   );
 }

@@ -100,13 +100,16 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(patch: Partial<Settings>) {
   await loadSettings();
+  const prev = current;
   current = { ...current, ...patch };
+  // Each secure store write is a keystore round trip, so only touch the values that changed
+  const touched = (Object.keys(patch) as (keyof Settings)[]).filter((k) => current[k] !== prev[k]);
   await Promise.all(
-    (Object.keys(SECURE) as (keyof typeof SECURE)[]).map((k) =>
-      SecureStore.setItemAsync(SECURE[k], k === 'tts' ? (current.tts ? '1' : '0') : current[k]),
-    ),
+    touched
+      .filter((k): k is keyof typeof SECURE => k in SECURE)
+      .map((k) => SecureStore.setItemAsync(SECURE[k], k === 'tts' ? (current.tts ? '1' : '0') : current[k])),
   );
-  for (const k of Object.keys(PLAIN) as (keyof typeof PLAIN)[]) {
+  for (const k of touched.filter((k): k is keyof typeof PLAIN => k in PLAIN)) {
     db.runSync('INSERT INTO prefs (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', PLAIN[k], current[k]);
   }
   changed.notify();

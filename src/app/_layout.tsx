@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 
+import { ToastHost } from '@/components/common/Toast';
 import { Colors, Fonts } from '@/constants/theme';
 import { migrate } from '@/db/db';
 
@@ -41,6 +42,7 @@ export default function RootLayout() {
         <Stack.Screen name="trip/[id]/photo" options={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#000' } }} />
         <Stack.Screen name="trip/[id]/note" options={{ presentation: 'modal', animation: 'slide_from_bottom', headerShown: false }} />
       </Stack>
+      <ToastHost />
     </>
   );
 }

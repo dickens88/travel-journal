@@ -44,4 +44,22 @@ describe('buildFeed', () => {
     const first = sessions.find((s) => s.kind === 'chat' && s.firstRowId === 1);
     expect(first).toMatchObject({ turns: 2, question: '这些门为什么是红色的？', answer: '记好了', usedSearch: true, savedNotes: 1, photoId: 'p1' });
   });
+
+  it('splits one upload into cards by city, newest first, labelled with country and city', () => {
+    const at = (id: string, minutes: number, city: string | null) => ({ ...photo(id, t0 + minutes * 60_000, 'b1'), country: city ? '日本' : null, city });
+    const feed = buildFeed([at('a', 0, '京都市'), at('b', 10, '京都市'), at('c', 120, '大阪市'), at('d', 130, '京都市')], [], []);
+    const cards = feed[0].items.flatMap((i) => (i.kind === 'photos' ? [{ area: i.area, ids: i.photos.map((p) => p.id) }] : []));
+    expect(cards).toEqual([
+      { area: '日本 · 京都市', ids: ['d'] },
+      { area: '日本 · 大阪市', ids: ['c'] },
+      { area: '日本 · 京都市', ids: ['a', 'b'] },
+    ]);
+  });
+
+  it('splits photos with no known city when they are far apart', () => {
+    const at = (id: string, minutes: number, lat: number) => ({ ...photo(id, t0 + minutes * 60_000, 'b1'), lat });
+    const feed = buildFeed([at('a', 0, 35), at('b', 10, 35.01), at('c', 120, 36)], [], []);
+    const cards = feed[0].items.flatMap((i) => (i.kind === 'photos' ? [i.photos.map((p) => p.id)] : []));
+    expect(cards).toEqual([['c'], ['a', 'b']]);
+  });
 });

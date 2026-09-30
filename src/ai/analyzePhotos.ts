@@ -1,6 +1,7 @@
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
+import { matchAnalyses } from './analysisMatch';
 import { assertOAUsable, assertUsable, describeError, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
 import { chatCompletion, jsonInstruction, parseJSONReplyOrThrow, toOAParts } from './openai';
 import { PhotoAnalysisSchema, type PhotoAnalysis } from './schemas';
@@ -78,15 +79,13 @@ async function doAnalyze(tripId: string) {
       content.push({ type: 'text', text: PROMPT });
       const photos = await analyzeBatch(backend, content, batch.length);
       const patches: PhotoPatch[] = [];
-      for (const a of photos) {
-        const p = batch.find((b) => b.id === a.id);
-        if (!p) continue;
+      for (const [p, a] of matchAnalyses(batch, photos)) {
         // Android phones without Google services often can't reverse-geocode; fall back to the model's reading
         const fill = p.lat != null && !p.city;
         patches.push({
-          id: a.id,
+          id: p.id,
           fields: {
-            analysis_json: JSON.stringify(a),
+            analysis_json: JSON.stringify({ ...a, id: p.id }),
             ...(!p.place_name && a.place ? { place_name: a.place } : {}),
             ...(fill ? { city: a.city || null, region: a.region || null, country: a.country || null } : {}),
           },

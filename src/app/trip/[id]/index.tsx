@@ -4,6 +4,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isUserTurn } from '@/ai/chatContent';
+import { AskBuddyButton } from '@/components/buddy/AskBuddyButton';
 import { Button, Display, Icon, ProgressBar } from '@/components/common/ui';
 import { FeedItemView } from '@/components/trip/FeedItems';
 import { JournalStatusCard } from '@/components/trip/JournalStatusCard';
@@ -115,9 +116,7 @@ export default function TripFeedScreen() {
           })}
         </View>
       </ScrollView>
-      <Button
-        label="问搭子"
-        icon="chat"
+      <AskBuddyButton
         onPress={() => router.push(`/trip/${id}/buddy`)}
         style={[styles.fab, { bottom: insets.bottom + 84 }]}
       />
