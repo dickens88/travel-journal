@@ -38,7 +38,7 @@ export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs
   return (
     <View style={{ gap: 8 }}>
       <View style={styles.card}>
-        {jobs.generating ? <ActivityIndicator color={Colors.pop} /> : <Icon name="journal" size={28} color={Colors.pop} duo="rgba(244,188,82,0.3)" />}
+        {jobs.generating ? <ActivityIndicator color={Colors.sun} /> : <Icon name="journal" size={28} color={Colors.sun} duo={Colors.pop} />}
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.sub}>{sub}</Text>
@@ -58,7 +58,7 @@ export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs
 }
 
 const styles = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, paddingHorizontal: 16, borderRadius: 18, backgroundColor: Colors.ink },
-  title: { fontFamily: Fonts.display, color: Colors.onDark, fontSize: 17 },
-  sub: { color: '#D8CFBD', fontSize: 12, lineHeight: 17 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, paddingHorizontal: 16, borderRadius: 18, borderWidth: 1, borderColor: Colors.pop, backgroundColor: Colors.popSoft },
+  title: { fontFamily: Fonts.display, color: Colors.ink, fontSize: 17 },
+  sub: { color: Colors.inkSoft, fontSize: 12, lineHeight: 17 },
 });

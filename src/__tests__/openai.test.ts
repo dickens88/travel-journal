@@ -46,6 +46,18 @@ describe('OpenAI-compatible client', () => {
     expect(JSON.parse(res.toolCalls[0].function.arguments)).toEqual({ text: '巴黎下雨', related_photo_id: '' });
   });
 
+  it('turns off thinking only for Volcengine Ark', async () => {
+    const fetch = jest.fn(async () => sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+    (global as any).fetch = fetch;
+    const req = { model: 'm', max_tokens: 10, messages: [] };
+    await chatCompletion({ apiKey: 'k', baseURL: 'https://ark.cn-beijing.volces.com/api/v3/' }, req);
+    await chatCompletion(cfg, req);
+    const bodies = fetch.mock.calls.map((c: any[]) => JSON.parse(c[1].body));
+    expect((fetch.mock.calls[0] as any[])[0]).toBe('https://ark.cn-beijing.volces.com/api/v3/chat/completions');
+    expect(bodies[0].thinking).toEqual({ type: 'disabled' });
+    expect(bodies[1].thinking).toBeUndefined();
+  });
+
   it('surfaces HTTP errors with status and server message', async () => {
     (global as any).fetch = async () => ({ ok: false, status: 401, statusText: 'Unauthorized', text: async () => '{"error":{"message":"bad key"}}' });
     await expect(chatCompletion(cfg, { model: 'm', max_tokens: 10, messages: [] })).rejects.toMatchObject({ status: 401, message: 'bad key' });

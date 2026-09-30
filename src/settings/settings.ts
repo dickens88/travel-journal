@@ -13,13 +13,13 @@ export type Settings = {
   baseURL: string;
   // Empty means the app's default model
   anthropicModel: string;
-  // OpenAI-compatible (Huawei Cloud MaaS, DeepSeek, Qwen, …)
+  // OpenAI-compatible (Volcengine Ark, DeepSeek, Qwen, …)
   openaiKey: string;
   openaiBaseURL: string;
   openaiModel: string;
   // Model that can read images; empty means openaiModel does
   openaiVisionModel: string;
-  // Where the vision model is served; empty means openaiBaseURL. Huawei MaaS serves some models on /v1 and others on /v2
+  // Where the vision model is served; empty means openaiBaseURL. For a vision model hosted by a different service
   openaiVisionBaseURL: string;
   // Buddy system prompt; empty means the built-in default
   buddyPrompt: string;

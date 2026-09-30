@@ -13,8 +13,8 @@ import { Colors } from '@/constants/theme';
 import { avatarPhotoFile, deleteAvatarPhoto, pickAvatarPhoto } from '@/settings/avatar';
 import { saveSettings, useSettings, useSettingsReady, type Provider, type Settings } from '@/settings/settings';
 
-// Most MaaS models are served on /v2; the few that aren't (e.g. qwen2.5-vl-72b on /v1) get their own vision Base URL
-const MAAS_URL = 'https://api.modelarts-maas.com/v2';
+// Volcengine Ark; Doubao Seed 2.1 lite reads images too, so one model covers writing and photos
+const ARK = { openaiBaseURL: 'https://ark.cn-beijing.volces.com/api/v3', openaiModel: 'doubao-seed-2-1-lite-260915' };
 const CLAUDE_KEYS_URL = 'https://platform.claude.com/settings/keys';
 
 type Status = { ok: boolean; text: string } | null;
@@ -190,23 +190,23 @@ function ModelCard() {
       {openai ? (
         <>
           <Field label="Base URL" value={form.openaiBaseURL} onChangeText={(openaiBaseURL) => set({ openaiBaseURL })} placeholder="https://…/v1" keyboardType="url" />
-          {!form.openaiBaseURL ? (
-            <Text style={[styles.hint, { color: Colors.teal }]} onPress={() => set({ openaiBaseURL: MAAS_URL })}>
-              使用华为云 MaaS 地址
+          {form.openaiBaseURL !== ARK.openaiBaseURL || form.openaiModel !== ARK.openaiModel ? (
+            <Text style={[styles.hint, { color: Colors.teal }]} onPress={() => set({ ...ARK, openaiVisionModel: '', openaiVisionBaseURL: '' })}>
+              使用火山方舟 + 豆包 Seed 2.1 lite
             </Text>
           ) : null}
-          <KeyField label="API Key" value={form.openaiKey} onChangeText={(openaiKey) => set({ openaiKey })} placeholder="sk-…" />
-          <Field label="模型名" value={form.openaiModel} onChangeText={(openaiModel) => set({ openaiModel })} placeholder="如 deepseek-v3.1" />
+          <KeyField label="API Key" value={form.openaiKey} onChangeText={(openaiKey) => set({ openaiKey })} placeholder="ark-… 或 sk-…" />
+          <Field label="模型名" value={form.openaiModel} onChangeText={(openaiModel) => set({ openaiModel })} placeholder="如 doubao-seed-2-1-lite-260915" />
           <Field label="看图模型（可选，留空则用上面的模型）" value={form.openaiVisionModel} onChangeText={(openaiVisionModel) => set({ openaiVisionModel })} placeholder="支持图片输入的模型名" />
           <Field
             label="看图模型 Base URL（可选，留空则用上面的地址）"
             value={form.openaiVisionBaseURL}
             onChangeText={(openaiVisionBaseURL) => set({ openaiVisionBaseURL })}
-            placeholder="如 https://api.modelarts-maas.com/v1"
+            placeholder="看图模型在别的服务上时才需要填"
             keyboardType="url"
           />
           <Text style={styles.hint}>
-            华为云 MaaS：在控制台「API Key 管理」创建 Key，模型名见各模型的「调用说明」。识别照片和带照片的对话会用看图模型，写游记用上面的模型。部分模型（如 qwen2.5-vl-72b）只在 /v1 地址上可用，其他模型用 /v2，这时把看图模型的地址单独填成 /v1。这个模式下搭子没有联网搜索。
+            火山方舟：在控制台「API Key 管理」创建 Key，并在「开通管理」里开通豆包模型。豆包 Seed 2.1 lite 能看图，看图模型留空即可；为了响应速度，调用火山方舟时会关闭深度思考。识别照片和带照片的对话会用看图模型，写游记用上面的模型。这个模式下搭子没有联网搜索。
           </Text>
         </>
       ) : (

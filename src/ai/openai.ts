@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// Minimal client for OpenAI-compatible /chat/completions endpoints (Huawei Cloud MaaS, DeepSeek, Qwen, …).
+// Minimal client for OpenAI-compatible /chat/completions endpoints (Volcengine Ark, DeepSeek, Qwen, …).
 // Only the widely supported subset is used: streaming, image_url parts and function tools — no response_format,
 // since compatible servers disagree on it; JSON output is requested in the prompt and validated with zod instead.
 
@@ -68,13 +68,19 @@ export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text
   }
 }
 
+// Doubao models on Volcengine Ark think by default, which turns a short reply into most of a minute and trips the photo timeout
+function extraFields(baseURL: string) {
+  return /\.volces\.com(\/|$)/.test(baseURL) ? { thinking: { type: 'disabled' } } : {};
+}
+
 async function streamCompletion(cfg: OAConfig, req: Request, signal: AbortSignal, onText?: (text: string) => void): Promise<Result> {
   let res: Response;
+  const baseURL = cfg.baseURL.trim().replace(/\/+$/, '');
   try {
-    res = await fetch(`${cfg.baseURL.trim().replace(/\/+$/, '')}/chat/completions`, {
+    res = await fetch(`${baseURL}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ ...req, stream: true }),
+      body: JSON.stringify({ ...req, ...extraFields(baseURL), stream: true }),
       signal,
     });
   } catch (e) {

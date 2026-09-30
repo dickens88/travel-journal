@@ -45,3 +45,10 @@ example
 # local EAS build artifacts
 build-output/
 *.apk
+
+# test code (kept local only, not pushed to GitHub)
+src/__tests__/
+**/*.test.ts
+**/*.test.tsx
+jest.global-setup.js
+scripts/test-*
