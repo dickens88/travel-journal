@@ -23,6 +23,12 @@ export type OAConfig = { apiKey: string; baseURL: string };
 type Request = { model: string; messages: OAMessage[]; tools?: OATool[]; max_tokens: number; temperature?: number };
 type Result = { text: string; toolCalls: OAToolCall[]; finishReason: string | null };
 
+// Used when a request doesn't set its own temperature
+export const DEFAULT_TEMPERATURE = 0.7;
+
+// The reply wasn't the JSON asked for; models slip on this now and then, so the request is worth repeating
+export class BadJSONError extends Error {}
+
 export class OpenAIError extends Error {
   constructor(
     readonly status: number | null,
@@ -96,7 +102,7 @@ async function streamCompletion(cfg: OAConfig, req: Request, signal: AbortSignal
     res = await fetch(`${baseURL}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ ...req, ...extraFields(baseURL), stream: true }),
+      body: JSON.stringify({ ...req, temperature: req.temperature ?? DEFAULT_TEMPERATURE, ...extraFields(baseURL), stream: true }),
       signal,
     });
   } catch (e) {
@@ -187,5 +193,5 @@ export function parseJSONReplyOrThrow<T>(schema: z.ZodType<T>, text: string): T 
   const r = readJSONReply(schema, text);
   if ('data' in r) return r.data;
   const head = text.trim().slice(0, 600);
-  throw new Error(getT().errors.badJSON(r.problem, head) + (text.trim().length > 600 ? '…' : ''));
+  throw new BadJSONError(getT().errors.badJSON(r.problem, head) + (text.trim().length > 600 ? '…' : ''));
 }

@@ -2,8 +2,8 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
 import { analyzePending } from './analyzePhotos';
 import { isUserTurn } from './chatContent';
-import { assertOAUsable, assertUsable, describeError, claudeBase, claudeEffort, getBackend, type Backend } from './client';
-import { chatCompletion, jsonInstruction, parseJSONReplyOrThrow } from './openai';
+import { assertUsable, completeJSON, describeError, claudeBase, claudeEffort, getBackend, type Backend } from './client';
+import { jsonInstruction } from './openai';
 import { JournalSchema, type Journal } from './schemas';
 import { buildChatTranscript, buildTripContext } from './tripContext';
 import { getT, type Messages } from '@/i18n';
@@ -22,16 +22,18 @@ export function parseJournal(json: string | undefined | null): Journal | null {
 
 async function writeJournal(backend: Backend, material: string, t: Messages): Promise<Journal | null> {
   if (backend.kind === 'openai') {
-    const res = await chatCompletion(backend.cfg, {
-      model: backend.model,
-      max_tokens: 16000,
-      messages: [
-        { role: 'system', content: t.ai.journal.system },
-        { role: 'user', content: `${material}\n\n${jsonInstruction(JournalSchema, t)}` },
-      ],
-    });
-    assertOAUsable(res.finishReason);
-    return parseJSONReplyOrThrow(JournalSchema, res.text);
+    return completeJSON(
+      backend.cfg,
+      {
+        model: backend.model,
+        max_tokens: 16000,
+        messages: [
+          { role: 'system', content: t.ai.journal.system },
+          { role: 'user', content: `${material}\n\n${jsonInstruction(JournalSchema, t)}` },
+        ],
+      },
+      JournalSchema,
+    );
   }
   const stream = backend.client.beta.messages.stream({
     ...claudeBase(backend.model),
@@ -45,7 +47,8 @@ async function writeJournal(backend: Backend, material: string, t: Messages): Pr
   return res.parsed_output;
 }
 
-export async function generateJournal(tripId: string) {
+// `fresh` writes from scratch instead of updating the saved journal, replacing it and any edits made to it
+export async function generateJournal(tripId: string, opts: { fresh?: boolean } = {}) {
   if (getJobs(tripId).generating) return;
   setJob(tripId, { generating: true, error: undefined });
   const startedAt = Date.now();
@@ -62,7 +65,7 @@ export async function generateJournal(tripId: string) {
     const chats = listChat(tripId);
     const context = buildTripContext(trip, photos, stopsFromPhotos(photos), listDays(tripId), notes, t);
     const transcript = buildChatTranscript(chats, t);
-    const existing = parseJournal(getJournal(tripId)?.content_json);
+    const existing = opts.fresh ? null : parseJournal(getJournal(tripId)?.content_json);
 
     const parts = [`<trip_material>\n${context}\n</trip_material>`];
     if (transcript) parts.push(`<buddy_chat>\n${transcript}\n</buddy_chat>`);
@@ -96,7 +99,7 @@ export async function generateJournal(tripId: string) {
       updateTrip(tripId, { cover_photo_id: cover.id });
     }
   } catch (e) {
-    setJob(tripId, { error: { title: getT().errors.journalFailed, message: describeError(e), retry: () => generateJournal(tripId) } });
+    setJob(tripId, { error: { title: getT().errors.journalFailed, message: describeError(e), retry: () => generateJournal(tripId, opts) } });
   } finally {
     setJob(tripId, { generating: false });
   }

@@ -120,9 +120,7 @@ export async function previewVoice(text: string, apiKey: string, voice: string) 
 
 // Reads a reply aloud: Doubao speech synthesis when a key is set, otherwise (or from where that fails) the phone's own voice.
 // The next piece is synthesized while the current one plays.
-export async function speak(text: string) {
-  // A reply that finishes after its chat was closed stays silent
-  if (!openScreens) return;
+async function speak(text: string) {
   stopSpeaking();
   const mine = turn;
   setReading(text);

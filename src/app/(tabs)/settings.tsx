@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { router, type Href } from 'expo-router';
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CLAUDE_MODELS, DEFAULT_MODEL } from '@/ai/client';
@@ -11,7 +11,7 @@ import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
 import { Display, Icon, Segmented, type IconName } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { LANGS, LOCALES, useLangPref, useT, type LangPref, type Messages } from '@/i18n';
-import { aiConfigured, saveSettings, setLanguage, useSettings, useSettingsReady, type Settings } from '@/settings/settings';
+import { aiConfigured, setLanguage, useSettings, useSettingsReady, type Settings } from '@/settings/settings';
 
 export default function SettingsScreen() {
   // Secure store loads asynchronously; the summaries need the saved values
@@ -87,9 +87,8 @@ function Overview() {
         <Row
           icon="speaker"
           title={t.settings.readAloud}
-          value={`${settings.tts ? t.settings.autoRead : t.settings.manualRead} · ${voice}`}
+          value={voice}
           href="/settings/voice"
-          trailing={<Switch value={settings.tts} onValueChange={(v) => saveSettings({ tts: v })} trackColor={{ true: Colors.accent }} thumbColor={Colors.card} />}
         />
         <Row icon="food" title={t.settings.food} value={maps} href="/settings/food" />
       </Group>
@@ -113,7 +112,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Row({ icon, title, value, href, badge, trailing }: { icon: IconName; title: string; value: string; href: Href; badge?: string | null; trailing?: ReactNode }) {
+function Row({ icon, title, value, href, badge }: { icon: IconName; title: string; value: string; href: Href; badge?: string | null }) {
   return (
     <Pressable onPress={() => router.push(href)} style={({ pressed }) => [styles.row, pressed && { backgroundColor: Colors.paper }]} accessibilityRole="button">
       <View style={styles.rowIcon}>
@@ -126,7 +125,7 @@ function Row({ icon, title, value, href, badge, trailing }: { icon: IconName; ti
         </Text>
       </View>
       {badge ? <Text style={styles.badge}>{badge}</Text> : null}
-      {trailing ?? <Icon name="next" size={16} color={Colors.muted} duo={null} />}
+      <Icon name="next" size={16} color={Colors.muted} duo={null} />
     </Pressable>
   );
 }

@@ -52,3 +52,8 @@ src/__tests__/
 **/*.test.tsx
 jest.global-setup.js
 scripts/test-*
+
+# local Expo module native build output
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/

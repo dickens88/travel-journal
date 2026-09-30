@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 import { ErrorNotice } from '@/components/common/ErrorNotice';
 import { Button, Icon } from '@/components/common/ui';
@@ -16,7 +16,8 @@ function pendingText(p: Pending, t: Messages) {
   return parts.join(t.common.listSep);
 }
 
-export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs }: { tripId: string; hasJournal: boolean; hasPhotos: boolean; pending: Pending; jobs: TripJobs }) {
+// `onJournal`: shown on the journal page itself, where "View" would go nowhere, so it offers a fresh rewrite instead
+export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs, onJournal }: { tripId: string; hasJournal: boolean; hasPhotos: boolean; pending: Pending; jobs: TripJobs; onJournal?: boolean }) {
   const t = useT();
   const c = t.journalCard;
   const fresh = pendingText(pending, t);
@@ -37,7 +38,16 @@ export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs
   } else {
     title = c.upToDate;
     sub = c.keepAdding;
-    action = { label: c.view, run: () => router.replace(`/trip/${tripId}/journal`) };
+    action = onJournal
+      ? {
+          label: c.regenerate,
+          run: () =>
+            Alert.alert(c.regenerateTitle, c.regenerateText, [
+              { text: t.common.cancel, style: 'cancel' },
+              { text: c.regenerate, style: 'destructive', onPress: () => generateJournal(tripId, { fresh: true }) },
+            ]),
+        }
+      : { label: c.view, run: () => router.replace(`/trip/${tripId}/journal`) };
   }
   return (
     <View style={{ gap: 8 }}>

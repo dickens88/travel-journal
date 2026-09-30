@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import type { z } from 'zod';
 
-import type { OAConfig } from './openai';
+import { BadJSONError, chatCompletion, DEFAULT_TEMPERATURE, parseJSONReplyOrThrow, type OAConfig } from './openai';
 import { photoBase64, photoUri } from '@/photos/storage';
 import { getT } from '@/i18n';
 import { loadSettings } from '@/settings/settings';
@@ -19,9 +20,10 @@ export const CLAUDE_MODELS = [
 // Server-side fallback re-runs a declined request on Anthropic's recommended model; only the 5.x family accepts it
 const FALLBACK = { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const };
 
-// Model plus the fields that depend on it
+// Model plus the fields that depend on it. The 5.x models reject temperature, so only Haiku gets the default.
 export function claudeBase(model: string) {
-  return /^claude-(fable-5-1|opus-5|opus-5-5|sonnet-5-5)$/.test(model) ? { model, ...FALLBACK } : { model };
+  if (/^claude-(fable-5-1|opus-5|opus-5-5|sonnet-5-5)$/.test(model)) return { model, ...FALLBACK };
+  return model.includes('haiku') ? { model, temperature: DEFAULT_TEMPERATURE } : { model };
 }
 
 // Haiku rejects the effort setting
@@ -83,4 +85,20 @@ export function assertUsable(stopReason: string | null) {
 // OpenAI finish_reason in Anthropic stop_reason terms
 export function assertOAUsable(finishReason: string | null) {
   assertUsable(finishReason === 'length' ? 'max_tokens' : finishReason === 'content_filter' ? 'refusal' : null);
+}
+
+// Attempts at an OpenAI-compatible JSON reply before a malformed one is reported
+const JSON_ATTEMPTS = 3;
+
+// A completion whose reply must fit the schema; models slip off JSON now and then, so a malformed reply is asked for again
+export async function completeJSON<T>(cfg: OAConfig, req: Parameters<typeof chatCompletion>[1], schema: z.ZodType<T>, opts?: Parameters<typeof chatCompletion>[3]): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await chatCompletion(cfg, req, undefined, opts);
+    assertOAUsable(res.finishReason);
+    try {
+      return parseJSONReplyOrThrow(schema, res.text);
+    } catch (e) {
+      if (!(e instanceof BadJSONError) || attempt >= JSON_ATTEMPTS) throw e;
+    }
+  }
 }

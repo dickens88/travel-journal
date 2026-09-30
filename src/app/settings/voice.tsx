@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { describeError } from '@/ai/client';
 import { DEFAULT_VOICE, TTS_VOICES } from '@/ai/cloudTts';
@@ -8,7 +8,7 @@ import { Button, Chip } from '@/components/common/ui';
 import { KeyField, Section, SettingsPage, StatusNote, styles as formStyles, Tip, useSettingsSave, type Status } from '@/components/settings/form';
 import { Colors } from '@/constants/theme';
 import { useT } from '@/i18n';
-import { saveSettings, useSettings, useSettingsReady } from '@/settings/settings';
+import { useSettings, useSettingsReady } from '@/settings/settings';
 
 const SPEECH_KEYS_URL = 'https://console.volcengine.com/speech/new/setting/apikeys';
 
@@ -48,13 +48,6 @@ function VoiceForm() {
           <Button label={t.voice.preview} icon="speaker" onPress={preview} loading={previewing} disabled={!key || saving} style={{ flex: 1 }} />
         </>
       }>
-      <Section note={t.voice.autoNote}>
-        <View style={formStyles.row}>
-          <Text style={{ flex: 1, fontSize: 15, color: Colors.ink }}>{t.voice.autoRead}</Text>
-          <Switch value={settings.tts} onValueChange={(v) => saveSettings({ tts: v })} trackColor={{ true: Colors.accent }} thumbColor={Colors.card} />
-        </View>
-      </Section>
-
       <Section title={t.voice.sound}>
         <View style={[formStyles.row, { alignItems: 'flex-start' }]}>
           <Text style={[formStyles.hint, { flex: 1 }]}>{t.voice.soundHint}</Text>

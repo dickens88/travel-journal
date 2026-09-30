@@ -2,8 +2,8 @@ import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/mes
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
 import { matchAnalyses } from './analysisMatch';
-import { assertOAUsable, assertUsable, describeError, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
-import { chatCompletion, jsonInstruction, parseJSONReplyOrThrow, toOAParts } from './openai';
+import { assertUsable, completeJSON, describeError, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
+import { jsonInstruction, toOAParts } from './openai';
 import { photoAnalysisSchema, type PhotoAnalysis } from './schemas';
 import { fmtLocal, photoPlace } from './tripContext';
 import { listPhotos, updatePhotos, type PhotoPatch } from '@/db/repo';
@@ -53,7 +53,7 @@ export function analyzePending(tripId: string, photoIds?: string[]): Promise<voi
 async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], count: number, t: Messages): Promise<PhotoAnalysis[]> {
   const schema = photoAnalysisSchema(t);
   if (backend.kind === 'openai') {
-    const res = await chatCompletion(
+    const res = await completeJSON(
       backend.visionCfg,
       {
         model: backend.visionModel,
@@ -62,11 +62,10 @@ async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], 
         temperature: 0.2,
         messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(schema, t) }] }],
       },
-      undefined,
+      schema,
       { timeoutMs: TIMEOUT_MS },
     );
-    assertOAUsable(res.finishReason);
-    return parseJSONReplyOrThrow(schema, res.text).photos;
+    return res.photos;
   }
   const res = await backend.client.beta.messages.parse({
     ...claudeBase(backend.model),

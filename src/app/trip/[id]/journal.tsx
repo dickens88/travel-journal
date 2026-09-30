@@ -132,7 +132,7 @@ export default function JournalScreen() {
           {editing ? (
             <Text style={styles.muted}>{t.journal.editHint}</Text>
           ) : (
-            <JournalStatusCard tripId={id} hasJournal={!!journal} hasPhotos={photos.length > 0} pending={pending} jobs={jobs} />
+            <JournalStatusCard tripId={id} hasJournal={!!journal} hasPhotos={photos.length > 0} pending={pending} jobs={jobs} onJournal />
           )}
           {editing ? (
             <EditBox value={draft.summary} onChangeText={(summary) => edit({ summary })} placeholder={t.journal.summaryPlaceholder} style={styles.summary} />

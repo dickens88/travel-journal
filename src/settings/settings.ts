@@ -26,7 +26,6 @@ export type Settings = {
   buddyPrompt: string;
   // Buddy avatar: empty for the default icon, a preset animal id, or `photo:<file>` for an uploaded picture
   buddyAvatar: string;
-  tts: boolean;
   // Optional Doubao speech synthesis API Key for reading replies aloud; empty means the phone's own voice
   ttsKey: string;
   // Doubao 2.0 voice id; empty means the default voice
@@ -47,7 +46,6 @@ const SECURE = {
   openaiModel: 'openai_model',
   openaiVisionModel: 'openai_vision_model',
   openaiVisionBaseURL: 'openai_vision_base_url',
-  tts: 'tts_enabled',
   ttsKey: 'tts_key',
   ttsVoice: 'tts_voice',
   amapKey: 'amap_key',
@@ -80,7 +78,6 @@ let current: Settings = {
   openaiVisionBaseURL: '',
   buddyPrompt: '',
   buddyAvatar: '',
-  tts: true,
   ttsKey: '',
   ttsVoice: '',
   amapKey: '',
@@ -121,7 +118,6 @@ export async function loadSettings(): Promise<Settings> {
       provider: v.provider === 'openai' ? 'openai' : 'anthropic',
       buddyPrompt: readPref(PLAIN.buddyPrompt),
       buddyAvatar: readPref(PLAIN.buddyAvatar),
-      tts: v.tts !== '0',
     };
     ready = true;
     changed.notify();
@@ -139,7 +135,7 @@ export async function saveSettings(patch: Partial<Settings>) {
   await Promise.all(
     touched
       .filter((k): k is keyof typeof SECURE => k in SECURE)
-      .map((k) => SecureStore.setItemAsync(SECURE[k], k === 'tts' ? (current.tts ? '1' : '0') : current[k])),
+      .map((k) => SecureStore.setItemAsync(SECURE[k], current[k])),
   );
   for (const k of touched.filter((k): k is keyof typeof PLAIN => k in PLAIN)) {
     writePref(PLAIN[k], current[k]);

@@ -17,6 +17,7 @@ import { getJournal, getTrip, listPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
 import { getT, useT } from '@/i18n';
 import { deriveTrip } from '@/trip/derive';
+import XhsShare from '@modules/xhs-share';
 
 async function saveToAlbum(uris: string[]) {
   const { granted } = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
@@ -91,13 +92,26 @@ export default function ShareScreen() {
         await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: t.share.dialogTitle });
         return;
       }
-      // The share sheet takes one file, so cards go through the album then Xiaohongshu
+      const xhs = XhsShare;
+      if (xhs && !xhs.isInstalled()) {
+        Alert.alert(t.share.noXhs, t.share.noXhsText);
+        return;
+      }
       const uris = await captureAll();
-      await saveToAlbum(uris);
       await Clipboard.setStringAsync(caption);
+      if (xhs) {
+        // Xiaohongshu takes the images straight into a new note; the caption has to be pasted
+        Alert.alert(t.share.readyTitle, t.share.readyText, [
+          { text: t.common.cancel, style: 'cancel' },
+          { text: t.share.goPost, onPress: () => { try { xhs.shareImages(uris); } catch (e) { Alert.alert(t.share.failed, describeError(e)); } } },
+        ]);
+        return;
+      }
+      // No native module (iOS, Expo Go): the share sheet takes one file, so cards go through the album
+      await saveToAlbum(uris);
       Alert.alert(t.share.postedTitle, t.share.postedText, [
         { text: t.common.later, style: 'cancel' },
-        { text: t.share.openXhs, onPress: () => Linking.openURL('xhsdiscover://').catch(() => Alert.alert(t.share.noXhs)) },
+        { text: t.share.openXhs, onPress: () => Linking.openURL('xhsdiscover://home').catch(() => Alert.alert(t.share.noXhs, t.share.noXhsText)) },
       ]);
     });
 

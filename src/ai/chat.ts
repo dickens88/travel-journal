@@ -5,7 +5,6 @@ import { resolveSpot, type Spot } from './buddySkills';
 import { blocksOf, textOf, type StoredBlock } from './chatContent';
 import { assertOAUsable, assertUsable, claudeBase, claudeEffort, describeError, getBackend, photoImageBlock, type Backend } from './client';
 import { chatCompletion, OpenAIError, toOAParts, type OAContentPart, type OAMessage, type OATool, type OAToolCall } from './openai';
-import { speak } from './speech';
 import { buildTripContext } from './tripContext';
 import { addChatMessage, addNote, getTrip, listDays, listNotes, listPhotos, listSession } from '@/db/repo';
 import type { ChatRow, Photo, Trip } from '@/db/types';
@@ -273,13 +272,12 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
   // Fixed for the whole answer, so a language switch mid-reply can't mix prompts
   const t = getT();
   const context = buildTripContext(trip, photos, stopsFromPhotos(photos), listDays(tripId), listNotes(tripId), t);
-  const { buddyPrompt, tts, amapKey, googlePlacesKey } = await loadSettings();
+  const { buddyPrompt, amapKey, googlePlacesKey } = await loadSettings();
   // Located once per answer, and only if the model asks for nearby food
   let spotting: Promise<Spot | null> | null = null;
   const spot = () => (spotting ??= resolveSpot(trip, photos));
   const system = `${buddyPrompt.trim() || t.ai.persona}\n${t.ai.timeNote}\n${t.ai.foodNote}\n\n<trip>\n${context}\n</trip>\n\n${t.ai.replyLanguage}`;
 
-  let answer = '';
   for (let turn = 0; turn < 6; turn++) {
     // Earlier turns are already saved rows; stream only the current turn's text. Only the current conversation is sent.
     onText('');
@@ -289,7 +287,6 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
         ? await openaiTurn(backend, system, await toOAMessages(rows, photoById, image, t), t, onText)
         : await anthropicTurn(backend, system, await toApiMessages(rows, photoById, image, t), t, onText);
     if (reply.content.length) addChatMessage(tripId, 'assistant', reply.content);
-    answer = textOf(reply.content);
 
     if (reply.pause) continue;
     const uses = reply.content.filter((b) => b.type === 'tool_use');
@@ -315,6 +312,4 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
     );
     addChatMessage(tripId, 'user', results);
   }
-
-  if (tts && answer) speak(answer);
 }
