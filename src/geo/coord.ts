@@ -59,6 +59,16 @@ export function wgs84ToGcj02(p: LatLng): LatLng {
   return { lat: p.lat + dLat, lng: p.lng + dLng };
 }
 
+// Inverse of wgs84ToGcj02 by fixed-point iteration; a few rounds bring it well under a metre
+export function gcj02ToWgs84(p: LatLng): LatLng {
+  let w = p;
+  for (let i = 0; i < 4; i++) {
+    const g = wgs84ToGcj02(w);
+    w = { lat: w.lat + p.lat - g.lat, lng: w.lng + p.lng - g.lng };
+  }
+  return w;
+}
+
 export type TileSource = 'amap' | 'osm' | 'mixed';
 
 // [[south, west], [north, east]] of the INCLUDE boxes: where mixed maps draw AMap over OpenStreetMap

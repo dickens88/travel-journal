@@ -1,10 +1,14 @@
 import { z } from 'zod';
 
 // Minimal client for OpenAI-compatible /chat/completions endpoints (Volcengine Ark, DeepSeek, Qwen, …).
-// Only the widely supported subset is used: streaming, image_url parts and function tools — no response_format,
+// Only the widely supported subset is used: streaming, image_url / input_audio parts and function tools — no response_format,
 // since compatible servers disagree on it; JSON output is requested in the prompt and validated with zod instead.
 
-export type OAContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+export type OAContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+  // Base64 audio; only models with audio understanding accept it (e.g. Doubao Seed lite on Volcengine Ark)
+  | { type: 'input_audio'; input_audio: { data: string; format: 'wav' | 'mp3' } };
 export type OAToolCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 export type OAMessage =
   | { role: 'system'; content: string }
@@ -68,9 +72,18 @@ export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text
   }
 }
 
+export function isArk(baseURL: string) {
+  return /\.volces\.com(\/|$)/.test(baseURL.trim().replace(/\/+$/, ''));
+}
+
 // Doubao models on Volcengine Ark think by default, which turns a short reply into most of a minute and trips the photo timeout
 function extraFields(baseURL: string) {
-  return /\.volces\.com(\/|$)/.test(baseURL) ? { thinking: { type: 'disabled' } } : {};
+  return isArk(baseURL) ? { thinking: { type: 'disabled' } } : {};
+}
+
+// Reasoning models may prefix the reply with a <think> block
+export function stripThink(text: string) {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 }
 
 async function streamCompletion(cfg: OAConfig, req: Request, signal: AbortSignal, onText?: (text: string) => void): Promise<Result> {
@@ -147,7 +160,7 @@ export function jsonInstruction(schema: z.ZodType) {
 
 // Pull the JSON object out of a reply that may carry <think> blocks or code fences
 function readJSONReply<T>(schema: z.ZodType<T>, text: string): { data: T } | { problem: string } {
-  const s = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const s = stripThink(text);
   const start = s.indexOf('{');
   const end = s.lastIndexOf('}');
   if (start < 0 || end < start) return { problem: '回复里没有 JSON 对象' };

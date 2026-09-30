@@ -7,13 +7,11 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 
 import { parseExif, type ParsedExif } from './exif';
 import { photosDir } from './storage';
-import { analyzePending } from '@/ai/analyzePhotos';
 import { insertPhotos, listPhotos, updatePhotos, type PhotoPatch } from '@/db/repo';
 import type { Photo } from '@/db/types';
 import { interpolateMissing } from '@/geo/interpolate';
 import { describeLighting } from '@/geo/lighting';
-import { placeName } from '@/geo/place';
-import { aiConfigured, loadSettings } from '@/settings/settings';
+import { currentPosition, placeName } from '@/geo/place';
 import { setJob } from '@/trip/jobs';
 import { newId } from '@/utils/id';
 import { deviceOffsetMin } from '@/utils/time';
@@ -22,17 +20,34 @@ import { refreshWeather } from '@/weather/refresh';
 const MAX_EDGE = 1568;
 
 // Fallback picker (system photo picker); it may strip GPS, so the in-app gallery is preferred
-export async function pickPhotos(): Promise<ImportSource[]> {
+export async function pickPhotos(limit = 0): Promise<ImportSource[]> {
   const res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
-    allowsMultipleSelection: true,
-    selectionLimit: 0,
+    allowsMultipleSelection: limit !== 1,
+    selectionLimit: limit,
     exif: true,
     quality: 1,
   });
-  return res.canceled
-    ? []
-    : res.assets.map((a) => ({ uri: a.uri, width: a.width, height: a.height, exif: a.exif, assetId: a.assetId, fileName: a.fileName }));
+  return res.canceled ? [] : res.assets.map(toSource);
+}
+
+const toSource = (a: ImagePicker.ImagePickerAsset): ImportSource => ({ uri: a.uri, width: a.width, height: a.height, exif: a.exif, assetId: a.assetId, fileName: a.fileName });
+
+// Shoot a new photo with the system camera. Camera shots usually carry no GPS, so the location
+// comes from where the phone is right now; it was taken this moment, after all.
+export async function takePhoto(): Promise<ImportSource[]> {
+  const perm = await ImagePicker.requestCameraPermissionsAsync();
+  if (!perm.granted) throw new Error('没有相机权限，在系统设置里允许旅迹使用相机后再试');
+  const res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], exif: true, quality: 1 });
+  if (res.canceled) return [];
+  const location = await currentPosition();
+  return res.assets.map((a) => ({
+    ...toSource(a),
+    location,
+    created: Date.now(),
+    // Not in the library to look up, whatever the camera app did with it
+    skipLibraryLookup: true,
+  }));
 }
 
 export type ImportSource = {
@@ -44,8 +59,8 @@ export type ImportSource = {
   fileName?: string | null;
   location?: { latitude: number; longitude: number } | null;
   created?: number | null;
-  // Already read via MediaLibrary, so location/created are as complete as they get
-  fromLibrary?: boolean;
+  // Location/created are as complete as they get (read via MediaLibrary, or a fresh camera shot); don't search the library for more
+  skipLibraryLookup?: boolean;
 };
 
 export function requestLibraryAccess() {
@@ -63,7 +78,7 @@ async function sourceFromLibrary(assetId: string): Promise<ImportSource> {
     assetId,
     location: info.location ?? null,
     created: info.creationTime || null,
-    fromLibrary: true,
+    skipLibraryLookup: true,
   };
 }
 
@@ -111,8 +126,9 @@ async function shrinkAndStore(a: ImportSource, id: string) {
   return { file, width: saved.width, height: saved.height };
 }
 
-export async function importAssets(tripId: string, assets: ImportSource[]) {
-  if (!assets.length) return;
+// Resolves to the new photos' ids
+export async function importAssets(tripId: string, assets: ImportSource[]): Promise<string[]> {
+  if (!assets.length) return [];
   const batchId = newId();
   const addedAt = Date.now();
   let libraryGranted: boolean | undefined;
@@ -130,7 +146,7 @@ export async function importAssets(tripId: string, assets: ImportSource[]) {
         takenAt = a.created;
         offset = deviceOffsetMin(a.created);
       }
-      if ((lat == null || takenAt == null) && !a.fromLibrary) {
+      if ((lat == null || takenAt == null) && !a.skipLibraryLookup) {
         libraryGranted ??= (await requestLibraryAccess().catch(() => ({ granted: false }))).granted;
         if (libraryGranted) {
           try {
@@ -179,7 +195,8 @@ export async function importAssets(tripId: string, assets: ImportSource[]) {
     setJob(tripId, { importing: undefined });
   }
   refreshWeather(tripId);
-  if (aiConfigured(await loadSettings())) analyzePending(tripId);
+  // Photo recognition is user-triggered (recognizePhotos), never automatic on import
+  return rows.map((r) => r.id);
 }
 
 const geocodeCache = new Map<string, Location.LocationGeocodedAddress | null>();

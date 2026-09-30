@@ -100,7 +100,7 @@ export function skillPrompt(id: SkillId, { trip, photos, spot = null }: SkillInp
     case 'story':
       return STORY_PROMPT;
     case 'food':
-      return `${where(spot, dest)}，附近有什么地道的当地吃的？推荐几样招牌菜或小吃，说说大概价位、去哪吃、什么时候吃最合适。`;
+      return `${where(spot, dest)}，附近有什么地道的当地吃的？帮我查查附近评分高的店，推荐几家并说说招牌菜、人均、离我多远，什么时候去最合适。`;
     case 'shots':
       return `${where(spot, dest)}，附近有哪些好出片的机位？结合这几天的天气和光线，说说什么时间去、站哪儿、怎么拍更好看。`;
     case 'plan':

@@ -1,13 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { buddySkills, resolveSpot, skillPrompt, STORY_PROMPT, type BuddySkill } from '@/ai/buddySkills';
-import { retryBuddyMessage, sendBuddyMessage, speak } from '@/ai/chat';
+import { retryBuddyMessage, sendBuddyMessage } from '@/ai/chat';
 import { blocksOf, isToolResultTurn, isUserTurn, photoIdsOf, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import { describeError } from '@/ai/client';
+import { speak } from '@/ai/speech';
+import { AttachSheet } from '@/components/buddy/AttachSheet';
 import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
+import { Composer } from '@/components/buddy/Composer';
 import { SkillGrid, SkillStrip } from '@/components/buddy/Skills';
 import { Dots, TypingDots } from '@/components/buddy/TypingDots';
 import { ErrorNotice } from '@/components/common/ErrorNotice';
@@ -15,9 +18,10 @@ import { Markdown } from '@/components/common/Markdown';
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Button, Chip, Display, Icon } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
-import { getTrip, listChat, listNotes, listPhotos } from '@/db/repo';
+import { getTrip, listNotes, listPhotos, listSession, startNewChat } from '@/db/repo';
 import type { ChatRow, Photo } from '@/db/types';
 import { useQuery } from '@/db/useQuery';
+import { importAssets, pickPhotos, takePhoto, type ImportSource } from '@/photos/importPhotos';
 import { aiConfigured, saveSettings, useSettings, useSettingsReady } from '@/settings/settings';
 import { localParts } from '@/utils/time';
 
@@ -75,25 +79,31 @@ export default function BuddySheet() {
   const settings = useSettings();
   const settingsReady = useSettingsReady();
   const trip = useQuery(`getTrip:${id}`, () => getTrip(id));
-  const rows = useQuery(`listChat:${id}`, () => listChat(id));
+  const rows = useQuery(`listSession:${id}`, () => listSession(id));
   const photos = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const noteCount = useQuery(`listNotes:${id}`, () => listNotes(id)).length;
   const [input, setInput] = useState('');
-  const [photoId, setPhotoId] = useState<string | null>(photo ?? null);
+  // Trip photos going out with the next message
+  const [attached, setAttached] = useState<string[]>(photo ? [photo] : []);
+  const [attachOpen, setAttachOpen] = useState(false);
+  // Importing a photo just shot or picked from the phone's album
+  const [adding, setAdding] = useState(false);
   const autoAsked = useRef(false);
   // Decided once: `ask` is cleared after the auto-send, which must not then pop the keyboard
   const [focusInput] = useState(() => !!photo && ask !== 'describe');
-  // attach: the picked photo waits for a question; story: picking it asks for its story right away
-  const [picking, setPicking] = useState<'attach' | 'story' | null>(null);
+  // Choosing a photo for the "story" skill, which asks about it right away
+  const [picking, setPicking] = useState(false);
   const [streaming, setStreaming] = useState<string | null>(null);
   // Locating the user before a place-based skill can send
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
   const scroll = useRef<ScrollView>(null);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
+  const newestFirst = useMemo(() => [...photos].reverse(), [photos]);
   const skills = useMemo(() => (trip ? buddySkills(trip, photos) : []), [trip, photos]);
   const ready = settingsReady && aiConfigured(settings);
   const busy = streaming !== null || locating;
+  const canNewChat = !busy && rows.length > 0;
   // A fresh chat opens on the skill menu instead of an empty list; once it has started, a strip stays above an empty input
   const showGrid = ready && !busy && rows.length === 0;
   const showStrip = ready && !busy && rows.length > 0 && !input.trim();
@@ -102,32 +112,60 @@ export default function BuddySheet() {
   const exchange = async (job: () => Promise<void>, resend: () => void) => {
     setError(null);
     setStreaming('');
-    const before = listChat(id).length;
+    const before = listSession(id).length;
     try {
       await job();
     } catch (e) {
-      const saved = listChat(id).length > before;
+      const saved = listSession(id).length > before;
       setError({ message: describeError(e), retry: saved ? () => exchange(() => retryBuddyMessage(id, setStreaming), resend) : resend });
     } finally {
       setStreaming(null);
     }
   };
 
-  const send = async (preset?: string, attach = photoId) => {
+  const send = async (preset?: string, attach = attached) => {
     const text = (preset ?? input).trim();
-    if (!text || busy) return;
+    if (!text || busy || adding) return;
     if (preset === undefined) setInput('');
-    setPhotoId(null);
-    setPicking(null);
+    setAttached([]);
+    setPicking(false);
     await exchange(() => sendBuddyMessage(id, text, attach, setStreaming), () => send(text, attach));
   };
 
-  const tellStory = (p: Photo) => send(STORY_PROMPT, p.id);
+  const newChat = () => {
+    if (!canNewChat) return;
+    startNewChat(id);
+    setError(null);
+    setPicking(false);
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  };
+
+  const toggleAttached = (pid: string) => setAttached((a) => (a.includes(pid) ? a.filter((x) => x !== pid) : [...a, pid]));
+
+  // Photos from the camera or the phone's album join the trip first, then ride along with the message
+  const addFrom = async (source: () => Promise<ImportSource[]>) => {
+    setAttachOpen(false);
+    // iOS can't present the picker while the sheet is still sliding away
+    await new Promise((r) => setTimeout(r, 350));
+    try {
+      const sources = await source();
+      if (!sources.length) return;
+      setAdding(true);
+      const ids = await importAssets(id, sources);
+      setAttached((a) => [...a, ...ids.filter((x) => !a.includes(x))]);
+    } catch (e) {
+      Alert.alert('没能添加照片', describeError(e));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const tellStory = (p: Photo) => send(STORY_PROMPT, [p.id]);
 
   const runSkill = async (skill: BuddySkill) => {
     if (!trip || busy) return;
     if (skill.needs === 'photo') {
-      setPicking((v) => (v === 'story' ? null : 'story'));
+      setPicking((v) => !v);
       return;
     }
     let spot = null;
@@ -135,7 +173,7 @@ export default function BuddySheet() {
       setLocating(true);
       spot = await resolveSpot(trip, photos).finally(() => setLocating(false));
     }
-    send(skillPrompt(skill.id, { trip, photos, spot }), null);
+    send(skillPrompt(skill.id, { trip, photos, spot }), []);
   };
 
   useEffect(() => {
@@ -166,7 +204,7 @@ export default function BuddySheet() {
         <BuddyAvatar value={settings.buddyAvatar} size={42} />
         <View style={{ flex: 1 }}>
           <Display variant="subheading">旅行搭子</Display>
-          <Text style={styles.sub} numberOfLines={1}>对话会保存在「{trip?.title}」里</Text>
+          <Text style={styles.sub} numberOfLines={1}>保存在「{trip?.title}」</Text>
         </View>
         <Pressable
           onPress={() => saveSettings({ tts: !settings.tts })}
@@ -183,6 +221,7 @@ export default function BuddySheet() {
           <Icon name="sparkle" size={14} color="#4A433B" />
           <Text style={{ fontSize: 12, color: '#4A433B' }}>已了解 {photos.length} 张照片 · {noteCount} 条随手记</Text>
         </View>
+        {trip?.chat_since && !rows.length ? <Text style={styles.day}>之前的对话已收起，写游记时仍会用上</Text> : null}
         {settingsReady && !aiConfigured(settings) ? (
           <View style={styles.noKey}>
             <Text style={{ flex: 1, fontSize: 13 }}>还没有设置 AI 模型和 API Key，搭子暂时说不了话</Text>
@@ -211,17 +250,15 @@ export default function BuddySheet() {
       </ScrollView>
       {picking ? (
         <View style={styles.picker}>
-          {picking === 'story' ? (
-            <View style={styles.pickHead}>
-              <Text style={styles.pickHint}>选一张照片，搭子给你讲讲它背后的故事</Text>
-              <Pressable onPress={() => setPicking(null)} hitSlop={10} accessibilityLabel="取消">
-                <Icon name="close" size={16} color={Colors.muted} duo={null} />
-              </Pressable>
-            </View>
-          ) : null}
+          <View style={styles.pickHead}>
+            <Text style={styles.pickHint}>选一张照片，搭子给你讲讲它背后的故事</Text>
+            <Pressable onPress={() => setPicking(false)} hitSlop={10} accessibilityLabel="取消">
+              <Icon name="close" size={16} color={Colors.muted} duo={null} />
+            </Pressable>
+          </View>
           <ScrollView horizontal contentContainerStyle={{ gap: 6, padding: 8 }}>
-            {[...photos].reverse().map((p) => (
-              <Pressable key={p.id} onPress={() => (picking === 'story' ? tellStory(p) : (setPhotoId(p.id), setPicking(null)))}>
+            {newestFirst.map((p) => (
+              <Pressable key={p.id} onPress={() => tellStory(p)}>
                 <PhotoThumb file={p.file} style={styles.pickThumb} />
               </Pressable>
             ))}
@@ -231,28 +268,31 @@ export default function BuddySheet() {
       ) : showStrip ? (
         <SkillStrip skills={skills} onSkill={runSkill} />
       ) : null}
-      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-        <Pressable onPress={() => setPicking((v) => (v === 'attach' ? null : 'attach'))} style={styles.attach} accessibilityLabel="附加这趟旅行里的照片">
-          {photoId && photoMap.get(photoId) ? (
-            <PhotoThumb file={photoMap.get(photoId)!.file} style={{ width: 44, height: 44, borderRadius: 22 }} />
-          ) : (
-            <Icon name="addPhoto" size={22} />
-          )}
-        </Pressable>
-        <TextInput
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <Composer
           value={input}
           onChangeText={setInput}
-          placeholder={photoId ? '问问这张照片…' : '问点什么，也可以用输入法语音输入'}
+          onVoiceText={(t) => setInput((v) => v + t)}
           autoFocus={focusInput}
-          placeholderTextColor={Colors.muted}
-          style={styles.input}
-          multiline
-          accessibilityLabel="向旅行搭子提问"
+          attached={attached.map((pid) => photoMap.get(pid)).filter((p): p is Photo => !!p)}
+          onRemovePhoto={toggleAttached}
+          adding={adding}
+          onAttach={() => setAttachOpen(true)}
+          onNewChat={newChat}
+          canNewChat={canNewChat}
+          onSend={() => send()}
+          busy={busy}
         />
-        <Pressable onPress={() => send()} style={[styles.send, (!input.trim() || busy) && { opacity: 0.4 }]} accessibilityLabel="发送">
-          <Icon name="send" size={22} color={Colors.onDark} />
-        </Pressable>
       </View>
+      <AttachSheet
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        photos={newestFirst}
+        selected={attached}
+        onToggle={toggleAttached}
+        onCamera={() => addFrom(takePhoto)}
+        onLibrary={() => addFrom(() => pickPhotos(4))}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -277,8 +317,5 @@ const styles = StyleSheet.create({
   pickHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8 },
   pickHint: { flex: 1, fontSize: 12, color: Colors.muted },
   pickThumb: { width: 72, height: 72, borderRadius: 8 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: Colors.card, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.line },
-  attach: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.chip, alignItems: 'center', justifyContent: 'center' },
-  input: { flex: 1, minHeight: 44, maxHeight: 110, paddingHorizontal: 16, paddingTop: 11, paddingBottom: 11, borderRadius: 22, borderWidth: 1, borderColor: Colors.line, backgroundColor: Colors.paper, fontSize: 15, color: Colors.ink },
-  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center' },
+  composer: { paddingTop: 8, backgroundColor: Colors.paper },
 });

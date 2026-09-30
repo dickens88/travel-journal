@@ -1,16 +1,18 @@
 import type { BetaMessageParam, BetaToolResultBlockParam, BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages/messages';
-import * as Speech from 'expo-speech';
 import { z } from 'zod';
 
+import { resolveSpot, type Spot } from './buddySkills';
 import { blocksOf, textOf, type StoredBlock } from './chatContent';
-import { assertOAUsable, assertUsable, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
+import { assertOAUsable, assertUsable, claudeBase, claudeEffort, describeError, getBackend, photoImageBlock, type Backend } from './client';
 import { chatCompletion, OpenAIError, toOAParts, type OAContentPart, type OAMessage, type OATool, type OAToolCall } from './openai';
+import { speak } from './speech';
 import { buildTripContext } from './tripContext';
-import { addChatMessage, addNote, getTrip, listChat, listDays, listNotes, listPhotos } from '@/db/repo';
+import { addChatMessage, addNote, getTrip, listDays, listNotes, listPhotos, listSession } from '@/db/repo';
 import type { ChatRow, Photo, Trip } from '@/db/types';
+import type { LatLng } from '@/geo/distance';
+import { describeFood, findPlace, searchNearbyFood, type FoodKeys } from '@/geo/nearbyFood';
 import { loadSettings } from '@/settings/settings';
 import { photoAnalysis, stopsFromPhotos } from '@/trip/derive';
-import { stripMarkdown } from '@/utils/markdown';
 import { localParts } from '@/utils/time';
 
 // Default buddy persona; the user can replace it in Settings. The trip material is appended after it either way.
@@ -22,7 +24,7 @@ export const BUDDY_PROMPT = `你是用户这趟旅行的「旅行搭子」，一
 - 不确定的事实就直说不确定，不要编造店名、价格或时间。`;
 
 // OpenAI-compatible endpoints get no web search tool
-const NO_SEARCH = '当前没有联网搜索工具：涉及实时信息时直接说明查不到最新情况，建议用户出发前再核实。';
+const NO_SEARCH = '当前没有联网搜索工具（附近餐厅仍可用 search_nearby_food 查）：涉及其他实时信息时直接说明查不到最新情况，建议用户出发前再核实。';
 
 const SaveNoteInput = z.object({ text: z.string().min(1), related_photo_id: z.string() });
 
@@ -43,17 +45,48 @@ const SAVE_NOTE = {
   },
 };
 
+const NearbyFoodInput = z.object({ keyword: z.string(), radius_m: z.number(), place: z.string(), in_mainland_china: z.boolean() });
+
+// Runs on the phone around where the user is: AMap in mainland China, Google Places abroad, OpenStreetMap as fallback
+const NEARBY_FOOD = {
+  name: 'search_nearby_food',
+  description:
+    '查附近的真实餐厅，返回评分、评价数、价位、距离、营业时间。默认以用户当前位置（或最近一张带定位的照片）为中心；' +
+    '用户说了自己在哪、或问的是别处时，把那个地点填进 place。' +
+    '用户问吃什么、找餐厅、推荐美食时先调用，推荐的店必须来自结果，并说出评分、距离等依据；结果没有评分时如实说明。',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      keyword: {
+        type: 'string',
+        description: '想吃的菜系或菜名，如「火锅」「小笼包」；在国外用英文或当地语言（如 pizza、tapas、ramen）效果更好；不限就填空字符串',
+      },
+      radius_m: { type: 'integer', description: '搜索半径（米），步行范围 1000，默认 1500，最大 5000' },
+      place: {
+        type: 'string',
+        description:
+          '以哪里为中心。用当地语言写，并用逗号带上城市，如「西湖, 杭州」「Oslo Sentralstasjon, Oslo」「渋谷駅, 東京」；外国地名不要写中文译名。查用户当前位置附近就填空字符串',
+      },
+      in_mainland_china: { type: 'boolean', description: 'place 是否在中国大陆；place 为空时填 false' },
+    },
+    required: ['keyword', 'radius_m', 'place', 'in_mainland_china'],
+    additionalProperties: false,
+  },
+};
+
+const FUNCTIONS = [SAVE_NOTE, NEARBY_FOOD];
+
 // Haiku only has the basic web search tool
 const tools = (model: string): BetaToolUnion[] => [
   model.includes('haiku') ? { type: 'web_search_20250305', name: 'web_search', max_uses: 3 } : { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
-  { ...SAVE_NOTE, strict: true, eager_input_streaming: true },
+  ...FUNCTIONS.map((t) => ({ ...t, strict: true, eager_input_streaming: true })),
 ];
-const OA_TOOLS: OATool[] = [
-  { type: 'function', function: { name: SAVE_NOTE.name, description: SAVE_NOTE.description, parameters: SAVE_NOTE.input_schema } },
-];
+const OA_TOOLS: OATool[] = FUNCTIONS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
 
 // Tells the model how to read the stamps below; appended after the (user-editable) persona
 const TIME_NOTE = '用户消息开头括号里是发送时间（用户手机当地时间），最新一条的时间就是「现在」。';
+// Also outside the persona, so a custom prompt still looks restaurants up instead of recalling them
+const FOOD_NOTE = '推荐附近吃的、找餐厅时，先用 search_nearby_food 查真实的店，再结合当地特色挑几家；不要凭记忆报店名。';
 
 // Send time of a user message. Derived from the stored row so earlier turns render byte-identical every request —
 // a "current time" in the system prompt would change each minute and void the prompt cache for the whole history.
@@ -104,6 +137,26 @@ function runSaveNote(tripId: string, input: unknown, photoById: Map<string, Phot
     created_at: photo?.taken_at ?? Date.now(),
   });
   return photo?.place_name ? `已保存，并关联到 ${photo.place_name}` : '已保存';
+}
+
+async function runNearbyFood(input: unknown, spot: () => Promise<Spot | null>, keys: FoodKeys): Promise<string> {
+  const parsed = NearbyFoodInput.safeParse(input);
+  if (!parsed.success) return 'INVALID_INPUT';
+  const { keyword, radius_m, place, in_mainland_china } = parsed.data;
+  let at: LatLng;
+  let where: string;
+  if (place.trim()) {
+    const found = await findPlace(keys, place.trim(), in_mainland_china);
+    if (!found) return `没找到「${place}」这个地点，换个写法再查：用当地语言，带上城市`;
+    at = found;
+    where = `${found.label}（按用户说的「${place}」查到的位置）`;
+  } else {
+    const here = await spot();
+    if (!here) return '拿不到用户的位置（定位不可用，照片也没有定位）。问用户现在在哪，拿到地名后填进 place 再查';
+    at = here;
+    where = `${here.label || `${here.lat.toFixed(4)}, ${here.lng.toFixed(4)}`}${here.live ? '（用户当前位置）' : '（最近一张照片的位置）'}`;
+  }
+  return describeFood(await searchNearbyFood(keys, at, { keyword, radiusM: radius_m || undefined }), where);
 }
 
 // Stored rows -> OpenAI messages. Only text, trip photos and save_note calls carry over; Anthropic web search blocks are dropped.
@@ -210,12 +263,12 @@ async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system:
   return { content, pause: false };
 }
 
-export async function sendBuddyMessage(tripId: string, text: string, photoId: string | null, onText: (text: string) => void) {
+export async function sendBuddyMessage(tripId: string, text: string, photoIds: string[], onText: (text: string) => void) {
   const trip = getTrip(tripId);
   if (!trip) return;
   const backend = await getBackend();
   const userBlocks: StoredBlock[] = [];
-  if (photoId) userBlocks.push({ type: 'trip_photo', photo_id: photoId });
+  for (const id of photoIds) userBlocks.push({ type: 'trip_photo', photo_id: id });
   userBlocks.push({ type: 'text', text });
   addChatMessage(tripId, 'user', userBlocks);
   await answerLatest(tripId, trip, backend, onText);
@@ -238,14 +291,17 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
     return images.get(file)!;
   };
   const context = buildTripContext(trip, photos, stopsFromPhotos(photos), listDays(tripId), listNotes(tripId));
-  const { buddyPrompt, tts } = await loadSettings();
-  const system = `${buddyPrompt.trim() || BUDDY_PROMPT}\n${TIME_NOTE}\n\n<trip>\n${context}\n</trip>`;
+  const { buddyPrompt, tts, amapKey, googlePlacesKey } = await loadSettings();
+  // Located once per answer, and only if the model asks for nearby food
+  let spotting: Promise<Spot | null> | null = null;
+  const spot = () => (spotting ??= resolveSpot(trip, photos));
+  const system = `${buddyPrompt.trim() || BUDDY_PROMPT}\n${TIME_NOTE}\n${FOOD_NOTE}\n\n<trip>\n${context}\n</trip>`;
 
   let answer = '';
   for (let turn = 0; turn < 6; turn++) {
-    // Earlier turns are already saved rows; stream only the current turn's text
+    // Earlier turns are already saved rows; stream only the current turn's text. Only the current conversation is sent.
     onText('');
-    const rows = listChat(tripId);
+    const rows = listSession(tripId);
     const reply =
       backend.kind === 'openai'
         ? await openaiTurn(backend, system, await toOAMessages(rows, photoById, image), onText)
@@ -256,18 +312,27 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
     if (reply.pause) continue;
     const uses = reply.content.filter((b) => b.type === 'tool_use');
     if (!uses.length) break;
-    const results: BetaToolResultBlockParam[] = uses.map((b) => {
-      const out = b.name === 'save_note' ? runSaveNote(tripId, b.input, photoById) : `未知工具 ${b.name}`;
-      return { type: 'tool_result', tool_use_id: b.id, content: out, is_error: out === 'INVALID_INPUT' };
-    });
+    // Independent lookups (e.g. two food searches in one turn) run side by side
+    const results = await Promise.all(
+      uses.map(async (b): Promise<BetaToolResultBlockParam> => {
+        let out: string;
+        let failed = false;
+        try {
+          out =
+            b.name === 'save_note'
+              ? runSaveNote(tripId, b.input, photoById)
+              : b.name === NEARBY_FOOD.name
+                ? await runNearbyFood(b.input, spot, { amap: amapKey, google: googlePlacesKey })
+                : `未知工具 ${b.name}`;
+        } catch (e) {
+          out = `查询失败：${describeError(e)}`;
+          failed = true;
+        }
+        return { type: 'tool_result', tool_use_id: b.id, content: out, is_error: failed || out === 'INVALID_INPUT' };
+      }),
+    );
     addChatMessage(tripId, 'user', results);
   }
 
   if (tts && answer) speak(answer);
-}
-
-export function speak(text: string) {
-  Speech.stop();
-  // Replies are markdown; don't read the symbols aloud
-  Speech.speak(stripMarkdown(text), { language: 'zh-CN' });
 }

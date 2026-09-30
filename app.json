@@ -55,7 +55,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "旅迹需要读取你选中的照片，用来识别拍摄时间、地点和内容。"
+          "photosPermission": "旅迹需要读取你选中的照片，用来识别拍摄时间、地点和内容。",
+          "cameraPermission": "旅迹需要使用相机，拍下照片发给旅行搭子并加进这趟旅行。"
         }
       ],
       [
@@ -73,6 +74,25 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "写随手记时记下你所在的位置。"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "旅迹需要使用麦克风，把你对旅行搭子说的话转成文字。"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "buildArchs": [
+              "arm64-v8a"
+            ],
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "useLegacyPackaging": true
+          }
         }
       ]
     ],

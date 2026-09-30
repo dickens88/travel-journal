@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { buddySkills, destinationOf, lastPhotoSpot, skillPrompt } from '@/ai/buddySkills';
 import type { Photo, Trip } from '@/db/types';
 
-const trip = (end: string | null = null): Trip => ({ id: 't', title: '京都红叶', start_date: '2025-11-12', end_date: end, cover_photo_id: null, created_at: 0 });
+const trip = (end: string | null = null): Trip => ({ id: 't', title: '京都红叶', start_date: '2025-11-12', end_date: end, cover_photo_id: null, created_at: 0, chat_since: 0 });
 
 function photo(id: string, over: Partial<Photo> = {}): Photo {
   return {

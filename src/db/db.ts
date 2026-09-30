@@ -77,6 +77,10 @@ const MIGRATIONS = [
     value TEXT NOT NULL
   );
   `,
+  // Id of the last buddy message before the current conversation; earlier ones stay for the journal but leave the model's context
+  `
+  ALTER TABLE trips ADD COLUMN chat_since INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function migrate() {

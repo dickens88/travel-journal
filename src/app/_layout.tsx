@@ -32,6 +32,10 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: Colors.paper },
         }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/model" options={{ title: 'AI 模型' }} />
+        <Stack.Screen name="settings/buddy" options={{ title: '旅行搭子' }} />
+        <Stack.Screen name="settings/voice" options={{ title: '朗读回复' }} />
+        <Stack.Screen name="settings/food" options={{ title: '附近美食' }} />
         <Stack.Screen name="trip/new" options={{ title: '新建旅行' }} />
         <Stack.Screen name="trip/[id]/index" options={{ title: '' }} />
         <Stack.Screen name="trip/[id]/journal" options={{ headerShown: false }} />

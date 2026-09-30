@@ -124,6 +124,23 @@ export function listChat(tripId: string) {
   return db.getAllSync<ChatRow>('SELECT * FROM chat_messages WHERE trip_id = ? ORDER BY id', tripId);
 }
 
+// The current buddy conversation: messages after the trip's chat_since mark
+export function listSession(tripId: string) {
+  return db.getAllSync<ChatRow>(
+    'SELECT * FROM chat_messages WHERE trip_id = ?1 AND id > (SELECT chat_since FROM trips WHERE id = ?1) ORDER BY id',
+    tripId,
+  );
+}
+
+// Start a fresh buddy conversation; earlier messages are kept (the journal still reads them)
+export function startNewChat(tripId: string) {
+  db.runSync(
+    'UPDATE trips SET chat_since = (SELECT COALESCE(MAX(id), 0) FROM chat_messages WHERE trip_id = ?1) WHERE id = ?1',
+    tripId,
+  );
+  notifyDbChange();
+}
+
 export function addChatMessage(tripId: string, role: ChatRow['role'], content: unknown) {
   db.runSync(
     'INSERT INTO chat_messages (trip_id, role, content_json, created_at) VALUES (?, ?, ?, ?)',

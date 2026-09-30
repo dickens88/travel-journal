@@ -5,6 +5,7 @@ export type Trip = {
   end_date: string | null;
   cover_photo_id: string | null;
   created_at: number;
+  chat_since: number;
 };
 
 export type Photo = {

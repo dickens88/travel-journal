@@ -26,6 +26,13 @@ export type Settings = {
   // Buddy avatar: empty for the default icon, a preset animal id, or `photo:<file>` for an uploaded picture
   buddyAvatar: string;
   tts: boolean;
+  // Optional Doubao speech synthesis API Key for reading replies aloud; empty means the phone's own voice
+  ttsKey: string;
+  // Doubao 2.0 voice id; empty means the default voice
+  ttsVoice: string;
+  // Nearby restaurant search for the buddy: AMap (Web服务 key) in mainland China, Google Places abroad. Both optional; OpenStreetMap fills in
+  amapKey: string;
+  googlePlacesKey: string;
 };
 
 // Short values live in the secure store; long free text goes to the app database, since secure store values may be capped around 2 KB
@@ -40,6 +47,10 @@ const SECURE = {
   openaiVisionModel: 'openai_vision_model',
   openaiVisionBaseURL: 'openai_vision_base_url',
   tts: 'tts_enabled',
+  ttsKey: 'tts_key',
+  ttsVoice: 'tts_voice',
+  amapKey: 'amap_key',
+  googlePlacesKey: 'google_places_key',
 } as const;
 const PLAIN = { buddyPrompt: 'buddy_prompt', buddyAvatar: 'buddy_avatar' } as const;
 
@@ -65,6 +76,10 @@ let current: Settings = {
   buddyPrompt: '',
   buddyAvatar: '',
   tts: true,
+  ttsKey: '',
+  ttsVoice: '',
+  amapKey: '',
+  googlePlacesKey: '',
 };
 let loaded: Promise<void> | null = null;
 let ready = false;
