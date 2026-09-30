@@ -14,6 +14,7 @@ export type FeedItem =
       time: number;
       hm: string;
       firstRowId: number;
+      lastRowId: number;
       turns: number;
       question: string;
       answer: string;
@@ -100,6 +101,7 @@ export function buildFeed(photos: Photo[], notes: Note[], chats: ChatRow[]): Fee
       time: session[0].created_at,
       hm: parts.hm,
       firstRowId: session[0].id,
+      lastRowId: session[session.length - 1].id,
       turns: userTurns.length,
       question: textOf(firstUser),
       answer: lastAnswer ? stripMarkdown(textOf(blocksOf(lastAnswer.content_json))) : '',

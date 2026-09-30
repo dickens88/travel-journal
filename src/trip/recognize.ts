@@ -5,8 +5,8 @@ import { analyzePending } from '@/ai/analyzePhotos';
 import { getT } from '@/i18n';
 import { aiConfigured, loadSettings } from '@/settings/settings';
 
-// User-triggered recognition of every not-yet-analysed photo in the trip; errors land in the trip's job state
-export async function recognizePhotos(tripId: string) {
+// User-triggered recognition of the given photos (by default every not-yet-analysed one in the trip); errors land in the trip's job state
+export async function recognizePhotos(tripId: string, photoIds?: string[]) {
   if (!aiConfigured(await loadSettings())) {
     const t = getT();
     Alert.alert(t.common.aiNotSetUp, t.errors.recognizeNeedsAI, [
@@ -15,5 +15,5 @@ export async function recognizePhotos(tripId: string) {
     ]);
     return;
   }
-  analyzePending(tripId);
+  analyzePending(tripId, photoIds);
 }

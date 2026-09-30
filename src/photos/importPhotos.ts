@@ -26,6 +26,9 @@ export async function pickPhotos(limit = 0): Promise<ImportSource[]> {
     mediaTypes: ['images'],
     allowsMultipleSelection: limit !== 1,
     selectionLimit: limit,
+    // Many Android skins answer the new photo-picker intent with their own gallery, which ignores its multi-select
+    // limit and returns after one tap; the older content intent's multi-select flag is the one they honour
+    legacy: limit !== 1,
     exif: true,
     quality: 1,
   });

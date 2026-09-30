@@ -5,7 +5,7 @@ import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Card, Chip, Icon, Serif } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
-import { deleteNote } from '@/db/repo';
+import { deleteChatRange, deleteNote } from '@/db/repo';
 import type { Photo } from '@/db/types';
 import { lightingText } from '@/geo/lighting';
 import { useT } from '@/i18n';
@@ -15,6 +15,7 @@ import { photoAnalysis } from '@/trip/derive';
 import type { FeedItem } from '@/trip/feed';
 import type { TripJobs } from '@/trip/jobs';
 import { recognizePhotos } from '@/trip/recognize';
+import { confirmRemovePhoto } from '@/trip/remove';
 import { localParts } from '@/utils/time';
 
 function Time({ hm }: { hm: string }) {
@@ -31,7 +32,7 @@ function PhotoStrip({ photos, tripId }: { photos: Photo[]; tripId: string }) {
   return (
     <View style={styles.strip}>
       {shown.map((p) => (
-        <Pressable key={p.id} onPress={() => openPhoto(tripId, p.id)} style={styles.thumb} accessibilityRole="imagebutton" accessibilityLabel={t.feed.viewPhoto}>
+        <Pressable key={p.id} onPress={() => openPhoto(tripId, p.id)} onLongPress={() => confirmRemovePhoto(p)} style={styles.thumb} accessibilityRole="imagebutton" accessibilityLabel={t.feed.viewPhoto}>
           <PhotoThumb file={p.file} style={StyleSheet.absoluteFill} />
           {p.lat != null ? (
             <View style={styles.pin}>
@@ -82,13 +83,14 @@ function PhotoMeta({ photos, area, places }: { photos: Photo[]; area: string | n
 
 function PhotosCard({ item, jobs, tripId }: { item: Extract<FeedItem, { kind: 'photos' }>; jobs: TripJobs; tripId: string }) {
   const t = useT();
-  const unanalyzed = item.photos.filter((p) => !p.analysis_json).length;
+  const pending = item.photos.filter((p) => !p.analysis_json).map((p) => p.id);
+  const unanalyzed = pending.length;
   const included = item.photos.every((p) => p.journal_included_at != null);
   let chip = null;
-  if (unanalyzed && jobs.analyzing) chip = <Chip tone="accent" icon="sparkle" busy label={t.feed.recognizing(item.photos.length - unanalyzed, item.photos.length)} />;
+  if (pending.some((pid) => jobs.analyzing?.ids.includes(pid))) chip = <Chip tone="accent" icon="sparkle" busy label={t.feed.recognizing(item.photos.length - unanalyzed, item.photos.length)} />;
   else if (unanalyzed)
     chip = (
-      <Pressable onPress={() => recognizePhotos(tripId)} hitSlop={8} accessibilityRole="button" accessibilityLabel={t.feed.recognizeA11y(unanalyzed)}>
+      <Pressable onPress={() => recognizePhotos(tripId, pending)} hitSlop={8} accessibilityRole="button" accessibilityLabel={t.feed.recognizeA11y(unanalyzed)}>
         <Chip tone="accent" icon="sparkle" label={t.feed.recognize(unanalyzed)} />
       </Pressable>
     );
@@ -134,8 +136,13 @@ function ChatCard({ item, tripId, photos }: { item: Extract<FeedItem, { kind: 'c
   const { buddyAvatar } = useSettings();
   const t = useT();
   const photo = item.photoId ? photos.get(item.photoId) : undefined;
+  const confirmDelete = () =>
+    Alert.alert(t.feed.deleteChat, t.feed.deleteChatText, [
+      { text: t.common.cancel, style: 'cancel' },
+      { text: t.common.delete, style: 'destructive', onPress: () => deleteChatRange(tripId, item.firstRowId, item.lastRowId) },
+    ]);
   return (
-    <Pressable onPress={() => router.push(`/trip/${tripId}/buddy`)} accessibilityRole="button">
+    <Pressable onPress={() => router.push(`/trip/${tripId}/buddy`)} onLongPress={confirmDelete} accessibilityRole="button">
       <Card style={{ gap: 8 }}>
         <View style={styles.headRow}>
           <BuddyAvatar value={buddyAvatar} size={22} />

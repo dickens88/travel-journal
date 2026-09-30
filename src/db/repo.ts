@@ -101,6 +101,15 @@ export function updatePhotos(patches: PhotoPatch[]) {
   notifyDbChange();
 }
 
+// Clears the trip cover if it pointed at this photo; journal sections and chats skip missing ids
+export function deletePhoto(id: string) {
+  db.withTransactionSync(() => {
+    db.runSync('UPDATE trips SET cover_photo_id = NULL WHERE cover_photo_id = ?', id);
+    db.runSync('DELETE FROM photos WHERE id = ?', id);
+  });
+  notifyDbChange();
+}
+
 export function listNotes(tripId: string) {
   return db.getAllSync<Note>('SELECT * FROM notes WHERE trip_id = ? ORDER BY created_at', tripId);
 }
@@ -122,6 +131,12 @@ export function deleteNote(id: string) {
 
 export function listChat(tripId: string) {
   return db.getAllSync<ChatRow>('SELECT * FROM chat_messages WHERE trip_id = ? ORDER BY id', tripId);
+}
+
+// One feed chat card: its rows are a contiguous id range
+export function deleteChatRange(tripId: string, firstId: number, lastId: number) {
+  db.runSync('DELETE FROM chat_messages WHERE trip_id = ? AND id BETWEEN ? AND ?', tripId, firstId, lastId);
+  notifyDbChange();
 }
 
 // The current buddy conversation: messages after the trip's chat_since mark

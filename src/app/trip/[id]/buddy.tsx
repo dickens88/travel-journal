@@ -7,7 +7,7 @@ import { buddySkills, resolveSpot, skillPrompt, type BuddySkill } from '@/ai/bud
 import { retryBuddyMessage, sendBuddyMessage } from '@/ai/chat';
 import { blocksOf, isToolResultTurn, isUserTurn, photoIdsOf, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import { describeError } from '@/ai/client';
-import { speak } from '@/ai/speech';
+import { toggleReading, useReading, useSpeechScreen } from '@/ai/speech';
 import { AttachSheet } from '@/components/buddy/AttachSheet';
 import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
 import { Composer } from '@/components/buddy/Composer';
@@ -23,15 +23,16 @@ import type { ChatRow, Photo } from '@/db/types';
 import { useQuery } from '@/db/useQuery';
 import { useT } from '@/i18n';
 import { importAssets, pickPhotos, takePhoto, type ImportSource } from '@/photos/importPhotos';
-import { aiConfigured, saveSettings, useSettings, useSettingsReady } from '@/settings/settings';
+import { aiConfigured, useSettings, useSettingsReady } from '@/settings/settings';
 import { formatDayTime, localParts } from '@/utils/time';
 
 // Memoized: the sheet re-renders on every streamed token
 const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map<string, Photo> }) {
   const t = useT();
   const blocks = blocksOf(row.content_json);
-  if (isToolResultTurn(blocks)) return null;
   const text = textOf(blocks);
+  const reading = useReading() === text && !!text;
+  if (isToolResultTurn(blocks)) return null;
   if (row.role === 'user') {
     const attached = photoIdsOf(blocks).map((pid) => photos.get(pid)).filter(Boolean) as Photo[];
     return (
@@ -52,9 +53,9 @@ const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map
           <View style={styles.botBubble}>
             <Markdown text={text} style={styles.botText} />
           </View>
-          <Pressable style={styles.speak} onPress={() => speak(text)} accessibilityLabel={t.buddy.readReply}>
-            <Icon name="speaker" size={13} color={Colors.muted} />
-            <Text style={{ fontSize: 12, color: Colors.muted }}>{t.buddy.read}</Text>
+          <Pressable style={styles.speak} onPress={() => toggleReading(text)} accessibilityRole="button" accessibilityLabel={reading ? t.buddy.stopReading : t.buddy.readReply}>
+            <Icon name={reading ? 'stop' : 'speaker'} size={13} color={reading ? Colors.accent : Colors.muted} />
+            <Text style={{ fontSize: 12, color: reading ? Colors.accent : Colors.muted }}>{reading ? t.buddy.stop : t.buddy.read}</Text>
           </Pressable>
         </>
       ) : null}
@@ -78,6 +79,7 @@ export default function BuddySheet() {
   const settings = useSettings();
   const settingsReady = useSettingsReady();
   const t = useT();
+  useSpeechScreen();
   const trip = useQuery(`getTrip:${id}`, () => getTrip(id));
   const rows = useQuery(`listSession:${id}`, () => listSession(id));
   const photos = useQuery(`listPhotos:${id}`, () => listPhotos(id));
@@ -206,12 +208,6 @@ export default function BuddySheet() {
           <Display variant="subheading">{t.buddy.title}</Display>
           <Text style={styles.sub} numberOfLines={1}>{t.buddy.savedIn(trip?.title ?? '')}</Text>
         </View>
-        <Pressable
-          onPress={() => saveSettings({ tts: !settings.tts })}
-          accessibilityLabel={settings.tts ? t.buddy.autoReadOn : t.buddy.autoReadOff}
-          style={styles.headerBtn}>
-          <Icon name={settings.tts ? 'speaker' : 'speakerOff'} size={22} color={settings.tts ? Colors.accent : Colors.muted} duo={settings.tts ? Colors.pop : null} />
-        </Pressable>
         <Pressable onPress={() => router.back()} accessibilityLabel={t.buddy.collapse} style={styles.headerBtn}>
           <Icon name="collapse" size={22} duo={null} />
         </Pressable>

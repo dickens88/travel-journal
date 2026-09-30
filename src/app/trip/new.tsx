@@ -7,6 +7,7 @@ import { Button, Card, Display, Icon, type IconName } from '@/components/common/
 import { Colors, Fonts } from '@/constants/theme';
 import { createTrip } from '@/db/repo';
 import { useT, type Messages } from '@/i18n';
+import { addPhotos } from '@/photos/addPhotos';
 import { todayISO } from '@/utils/time';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -28,8 +29,7 @@ export default function NewTripScreen() {
     if (!DATE_RE.test(start) || (end && !DATE_RE.test(end))) return Alert.alert(t.newTrip.badDate);
     const id = createTrip(title.trim(), start, end || null);
     router.replace(`/trip/${id}`);
-    // The in-app gallery filters to the trip dates and keeps GPS, unlike the system picker
-    if (withPhotos) router.push(`/trip/${id}/pick`);
+    if (withPhotos) addPhotos(id);
   };
 
   return (

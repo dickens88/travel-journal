@@ -304,6 +304,8 @@ export const en: Messages = {
     inJournal: 'In the journal',
     photosAdded: (n) => `Added ${count(n, 'photo')}`,
     deleteNote: 'Delete this note?',
+    deleteChat: 'Delete this conversation?',
+    deleteChatText: 'Notes the buddy saved for you are kept.',
     note: 'Note',
     fromBuddy: ' · from the buddy chat',
     chatTurns: (n) => `Chatted with the buddy · ${count(n, 'round')}`,
@@ -389,8 +391,6 @@ export const en: Messages = {
 
   pick: {
     readFailed: "Couldn't read the gallery",
-    needPermission: 'Gallery access is needed to read when and where photos were taken',
-    systemPicker: 'Use the system picker',
     duringTrip: 'During the trip',
     allPhotos: 'All photos',
     limited: 'Only the photos you allowed are visible',
@@ -405,6 +405,9 @@ export const en: Messages = {
 
   photo: {
     showInfo: 'Show photo details',
+    delete: 'Delete photo',
+    deleteTitle: 'Delete this photo?',
+    deleteText: 'It will be removed from this trip. The original in your photo library is not affected.',
     hideInfo: 'Hide photo details',
     noLocation: 'This photo has no location',
     analyzing: (done, total) => `Recognising ${done}/${total}`,
@@ -447,11 +450,11 @@ export const en: Messages = {
     searched: 'Searched the web',
     readReply: 'Read this reply aloud',
     read: 'Read',
+    stopReading: 'Stop reading aloud',
+    stop: 'Stop',
     savedAsNote: 'Saved as a note',
     addPhotoFailed: "Couldn't add the photo",
     savedIn: (trip) => `Saved in "${trip}"`,
-    autoReadOn: 'Read aloud: on',
-    autoReadOff: 'Read aloud: off',
     collapse: 'Close',
     knows: (photos, notes) => `Knows ${count(photos, 'photo')} · ${count(notes, 'note')}`,
     earlierHidden: 'Earlier chats are tucked away; the journal still uses them',

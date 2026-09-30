@@ -50,6 +50,13 @@ export default function PickPhotosScreen() {
     setCursor(page.hasNextPage ? page.endCursor : null);
   };
 
+  // Cancelling returns to the gallery, unless there is no gallery to return to
+  const fromSystemPicker = async (leaveIfCancelled = false) => {
+    const sources = await pickPhotos().catch(() => []);
+    if (sources.length) importAssets(id, sources).catch((e) => Alert.alert(t.errors.importFailed, describeError(e)));
+    if (sources.length || leaveIfCancelled) router.back();
+  };
+
   useEffect(() => {
     if (!trip) return;
     let cancelled = false;
@@ -60,6 +67,8 @@ export default function PickPhotosScreen() {
         if (cancelled) return;
         setAccess(p.granted ? (p.accessPrivileges ?? 'all') : 'none');
         if (p.granted) load(null).catch((e) => Alert.alert(t.pick.readFailed, describeError(e)));
+        // Normally only opened with access (see addPhotos); if it was revoked meanwhile there is nothing to show here
+        else fromSystemPicker(true);
       });
     return () => {
       cancelled = true;
@@ -75,23 +84,9 @@ export default function PickPhotosScreen() {
     router.back();
   };
 
-  const fromSystemPicker = async () => {
-    const sources = await pickPhotos();
-    if (!sources.length) return;
-    importAssets(id, sources).catch((e) => Alert.alert(t.errors.importFailed, describeError(e)));
-    router.back();
-  };
-
   const size = (width - 6) / 4;
 
-  if (access === 'none') {
-    return (
-      <View style={[styles.screen, styles.center]}>
-        <Text style={styles.hint}>{t.pick.needPermission}</Text>
-        <Button label={t.pick.systemPicker} icon="photos" onPress={fromSystemPicker} />
-      </View>
-    );
-  }
+  if (access === 'none') return <View style={styles.screen} />;
 
   return (
     <View style={styles.screen}>
@@ -111,7 +106,7 @@ export default function PickPhotosScreen() {
             onPress={() =>
               MediaLibrary.presentPermissionsPickerAsync(['photo'])
                 .then(() => load(null))
-                .catch(fromSystemPicker)
+                .catch(() => fromSystemPicker())
             }
           />
         </View>
@@ -150,7 +145,7 @@ export default function PickPhotosScreen() {
         }}
       />
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
-        <Pressable onPress={fromSystemPicker} style={styles.system} accessibilityRole="button">
+        <Pressable onPress={() => fromSystemPicker()} style={styles.system} accessibilityRole="button">
           <Icon name="photos" size={20} color={Colors.muted} />
           <Text style={{ fontSize: 13, color: Colors.muted }}>{t.pick.systemAlbum}</Text>
         </Pressable>
@@ -162,7 +157,6 @@ export default function PickPhotosScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.paper },
-  center: { alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
   hint: { fontSize: 14, color: Colors.muted, textAlign: 'center' },
   limited: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginBottom: 10, padding: 10, borderRadius: 12, backgroundColor: Colors.accentSoft },
   already: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(20,16,12,0.5)', alignItems: 'center', justifyContent: 'center' },

@@ -14,6 +14,7 @@ import { Colors } from '@/constants/theme';
 import { getJournal, getTrip, listChat, listDays, listNotes, listPhotos, pendingCounts, updateTrip } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
 import { useT } from '@/i18n';
+import { addPhotos } from '@/photos/addPhotos';
 import { buildFeed } from '@/trip/feed';
 import { useJobs } from '@/trip/jobs';
 import { removeTrip } from '@/trip/remove';
@@ -123,7 +124,7 @@ export default function TripFeedScreen() {
         style={[styles.fab, { bottom: insets.bottom + 84 }]}
       />
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
-        <Button kind="secondary" label={t.trip.addPhotos} icon="addPhoto" onPress={() => router.push(`/trip/${id}/pick`)} style={{ flex: 1 }} loading={!!jobs.importing} />
+        <Button kind="secondary" label={t.trip.addPhotos} icon="addPhoto" onPress={() => addPhotos(id)} style={{ flex: 1 }} loading={!!jobs.importing} />
         <Button kind="secondary" label={t.trip.note} icon="note" onPress={() => router.push(`/trip/${id}/note`)} style={{ flex: 1 }} />
       </View>
       <Modal visible={renaming !== null} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>

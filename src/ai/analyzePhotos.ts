@@ -20,15 +20,34 @@ const TOKENS_PER_PHOTO = 600;
 // A batch normally answers in 10–20 s
 const TIMEOUT_MS = 60_000;
 
-const running = new Map<string, Promise<void>>();
+// A trip's recognition run: photo ids still to do, the batch in flight, and how many are done
+type Run = { queue: Set<string>; batch: string[]; done: number; promise: Promise<void> };
+const runs = new Map<string, Run>();
 
-// Analyse photos that have no analysis yet; concurrent callers share one run per trip
-export function analyzePending(tripId: string) {
-  const existing = running.get(tripId);
-  if (existing) return existing;
-  const run = doAnalyze(tripId).finally(() => running.delete(tripId));
-  running.set(tripId, run);
-  return run;
+function report(tripId: string, run: Run) {
+  const ids = [...run.batch, ...run.queue];
+  setJob(tripId, { analyzing: { done: run.done, total: run.done + ids.length, ids } });
+}
+
+// Analyse photos that have no analysis yet: the given ones, or all of the trip's. Requests made while a run is
+// going join its queue, so there is one run per trip, and it resolves once everything asked for is done.
+export function analyzePending(tripId: string, photoIds?: string[]): Promise<void> {
+  const ids = listPhotos(tripId)
+    .filter((p) => !p.analysis_json && (!photoIds || photoIds.includes(p.id)))
+    .map((p) => p.id);
+  const existing = runs.get(tripId);
+  if (existing) {
+    for (const pid of ids) if (!existing.batch.includes(pid)) existing.queue.add(pid);
+    report(tripId, existing);
+    return existing.promise;
+  }
+  if (!ids.length) return Promise.resolve();
+  const run: Run = { queue: new Set(ids), batch: [], done: 0, promise: Promise.resolve() };
+  runs.set(tripId, run);
+  setJob(tripId, { error: undefined });
+  report(tripId, run);
+  run.promise = doAnalyze(tripId, run);
+  return run.promise;
 }
 
 async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], count: number, t: Messages): Promise<PhotoAnalysis[]> {
@@ -59,17 +78,20 @@ async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], 
   return res.parsed_output?.photos ?? [];
 }
 
-async function doAnalyze(tripId: string) {
-  const pending = listPhotos(tripId).filter((p) => !p.analysis_json);
-  if (!pending.length) return;
-  let done = 0;
-  setJob(tripId, { analyzing: { done, total: pending.length }, error: undefined });
+async function doAnalyze(tripId: string, run: Run) {
   try {
     const backend = await getBackend();
     const t = getT();
     const d = t.ai.analyze;
-    for (let i = 0; i < pending.length; i += BATCH) {
-      const batch = pending.slice(i, i + BATCH);
+    while (run.queue.size) {
+      // Looked up afresh each time: queued photos may have been deleted in the meantime
+      const batch = listPhotos(tripId)
+        .filter((p) => run.queue.has(p.id) && !p.analysis_json)
+        .slice(0, BATCH);
+      if (!batch.length) break;
+      run.batch = batch.map((p) => p.id);
+      for (const p of batch) run.queue.delete(p.id);
+      report(tripId, run);
       const images = await Promise.all(batch.map((p) => photoImageBlock(p.file, { width: p.width, height: p.height, maxEdge: ANALYZE_EDGE })));
       const content: BetaContentBlockParam[] = batch.flatMap((p, j) => {
         const time = p.taken_at != null ? fmtLocal(p.taken_at, p.offset_min) : t.ai.context.timeUnknown;
@@ -94,12 +116,15 @@ async function doAnalyze(tripId: string) {
         });
       }
       updatePhotos(patches);
-      done += batch.length;
-      setJob(tripId, { analyzing: { done, total: pending.length } });
+      run.done += batch.length;
+      run.batch = [];
+      report(tripId, run);
     }
   } catch (e) {
-    setJob(tripId, { error: { title: getT().errors.photoRecognitionFailed, message: describeError(e), retry: () => analyzePending(tripId) } });
+    const failed = [...run.batch, ...run.queue];
+    setJob(tripId, { error: { title: getT().errors.photoRecognitionFailed, message: describeError(e), retry: () => analyzePending(tripId, failed) } });
   } finally {
+    runs.delete(tripId);
     setJob(tripId, { analyzing: undefined });
   }
 }

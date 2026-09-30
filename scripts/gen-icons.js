@@ -58,6 +58,7 @@ const ICONS = {
   sun: 'sun',
   sunCloud: 'cloud-sun',
   translate: 'translate',
+  trash: 'trash',
   walk: 'person-simple-walk',
   warning: 'warning',
   web: 'globe-hemisphere-east',

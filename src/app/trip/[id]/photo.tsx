@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,6 +21,7 @@ import { photoAnalysis } from '@/trip/derive';
 import { photoGroups } from '@/trip/feed';
 import { useJobs } from '@/trip/jobs';
 import { recognizePhotos } from '@/trip/recognize';
+import { confirmRemovePhoto } from '@/trip/remove';
 
 export default function PhotoViewer() {
   const { id, photo } = useLocalSearchParams<{ id: string; photo: string }>();
@@ -29,11 +30,14 @@ export default function PhotoViewer() {
   const all = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const jobs = useJobs(id);
   const t = useT();
-  // Page through the photos of the tapped feed card
-  const photos = useMemo(() => photoGroups(all).find((g) => g.photos.some((p) => p.id === photo))?.photos ?? [], [all, photo]);
-  const [index, setIndex] = useState(() => Math.max(0, photos.findIndex((p) => p.id === photo)));
+  // The photo on screen; its feed card's photos are the pages
+  const [shownId, setShownId] = useState(photo);
+  const photos = useMemo(() => photoGroups(all).find((g) => g.photos.some((p) => p.id === shownId))?.photos ?? [], [all, shownId]);
+  const index = Math.max(0, photos.findIndex((p) => p.id === shownId));
   const [immersive, setImmersive] = useState(false);
   const [pageHeight, setPageHeight] = useState(0);
+  const list = useRef<FlatList>(null);
+  const deleted = useRef<string | null>(null);
   const current = photos[index];
 
   // The geocoder may have been offline during import; try again for the photo on screen
@@ -41,16 +45,31 @@ export default function PhotoViewer() {
     if (current) nameLocation(current);
   }, [current]);
 
+  // The list keeps its old offset when a page goes away; line it up with the neighbour now shown
+  useEffect(() => {
+    if (!deleted.current || photos.some((p) => p.id === deleted.current)) return;
+    deleted.current = null;
+    list.current?.scrollToOffset({ offset: width * index, animated: false });
+  }, [photos, index, width]);
+
   if (!current) return null;
 
   const where = locationLabel(current, t);
   const caption = photoAnalysis(current)?.caption;
   const details = photoDetails(current, t);
   const located = current.lat != null && current.lng != null;
-  const scanning = !!jobs.analyzing && !current.analysis_json;
+  // Recognition runs photo by photo, so only the ones asked for show as in progress
+  const scanning = !!jobs.analyzing?.ids.includes(current.id) && !current.analysis_json;
   // One tap: the buddy describes the scene; the other attaches the photo and waits for the user's question
   const askBuddy = (ask?: 'describe') =>
     router.push({ pathname: '/trip/[id]/buddy', params: { id, photo: current.id, ...(ask ? { ask } : {}) } });
+  const remove = () =>
+    confirmRemovePhoto(current, () => {
+      const next = photos[index + 1] ?? photos[index - 1];
+      if (!next) return router.back();
+      deleted.current = current.id;
+      setShownId(next.id);
+    });
 
   return (
     <View style={styles.screen}>
@@ -58,6 +77,7 @@ export default function PhotoViewer() {
       <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setPageHeight(e.nativeEvent.layout.height)}>
         {pageHeight ? (
           <FlatList
+            ref={list}
             data={photos}
             keyExtractor={(p) => p.id}
             horizontal
@@ -65,7 +85,7 @@ export default function PhotoViewer() {
             showsHorizontalScrollIndicator={false}
             initialScrollIndex={index}
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
-            onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
+            onMomentumScrollEnd={(e) => setShownId(photos[Math.round(e.nativeEvent.contentOffset.x / width)]?.id ?? shownId)}
             renderItem={({ item }) => (
               <Pressable onPress={() => setImmersive((v) => !v)} style={{ width, height: pageHeight }} accessibilityLabel={immersive ? t.photo.showInfo : t.photo.hideInfo}>
                 <Image source={{ uri: photoUri(item.file) }} style={StyleSheet.absoluteFill} contentFit="contain" recyclingKey={item.id} transition={120} />
@@ -83,6 +103,9 @@ export default function PhotoViewer() {
               <Icon name="close" size={22} color={Colors.onDark} duo={null} />
             </Pressable>
             {photos.length > 1 ? <Text style={styles.counter}>{index + 1} / {photos.length}</Text> : null}
+            <Pressable onPress={remove} hitSlop={12} accessibilityRole="button" accessibilityLabel={t.photo.delete} style={styles.close}>
+              <Icon name="trash" size={20} color={Colors.onDark} duo={null} />
+            </Pressable>
           </View>
           <View style={styles.panel}>
             <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
@@ -93,16 +116,16 @@ export default function PhotoViewer() {
               {caption ? <Text style={styles.caption}>{caption}</Text> : null}
               {!current.analysis_json ? (
                 <View style={styles.recognize}>
-                  <Pulse active={!!jobs.analyzing}>
+                  <Pulse active={scanning}>
                     <Icon name="sparkle" size={14} color={Colors.pop} duo={null} />
                   </Pulse>
                   <Text style={styles.recognizeText} numberOfLines={3}>
-                    {jobs.analyzing ? t.photo.analyzing(jobs.analyzing.done, jobs.analyzing.total) : jobs.error ? `${jobs.error.title}: ${jobs.error.message}` : t.photo.notAnalyzed}
+                    {scanning ? t.photo.analyzing(jobs.analyzing!.done, jobs.analyzing!.total) : jobs.error ? `${jobs.error.title}: ${jobs.error.message}` : t.photo.notAnalyzed}
                   </Text>
-                  {jobs.analyzing ? (
+                  {scanning ? (
                     <Dots size={5} />
                   ) : (
-                    <Pressable onPress={() => recognizePhotos(id)} hitSlop={8} accessibilityRole="button">
+                    <Pressable onPress={() => recognizePhotos(id, [current.id])} hitSlop={8} accessibilityRole="button">
                       <Text style={styles.recognizeBtn}>{jobs.error ? t.common.retry : t.photo.recognize}</Text>
                     </Pressable>
                   )}

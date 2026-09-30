@@ -308,6 +308,8 @@ export const zh = {
     inJournal: '已写入游记',
     photosAdded: (n: number) => `添加了 ${n} 张照片`,
     deleteNote: '删除这条随手记？',
+    deleteChat: '删除这段对话？',
+    deleteChatText: '搭子帮你存下的随手记会保留。',
     note: '随手记',
     fromBuddy: ' · 来自搭子对话',
     chatTurns: (n: number) => `和搭子聊了 ${n} 轮`,
@@ -393,8 +395,6 @@ export const zh = {
 
   pick: {
     readFailed: '读取相册失败',
-    needPermission: '需要相册权限才能读取照片的拍摄时间和地点',
-    systemPicker: '用系统相册选择',
     duringTrip: '旅行期间',
     allPhotos: '全部照片',
     limited: '只能看到你允许的照片',
@@ -409,6 +409,9 @@ export const zh = {
 
   photo: {
     showInfo: '显示照片信息',
+    delete: '删除照片',
+    deleteTitle: '删除这张照片？',
+    deleteText: '照片会从这段旅行里移除，相册里的原图不受影响。',
     hideInfo: '隐藏照片信息',
     noLocation: '这张照片没有位置信息',
     analyzing: (done: number, total: number) => `正在识别画面 ${done}/${total}`,
@@ -451,11 +454,11 @@ export const zh = {
     searched: '已联网搜索',
     readReply: '朗读这条回复',
     read: '朗读',
+    stopReading: '停止朗读',
+    stop: '停止',
     savedAsNote: '已记为随手记',
     addPhotoFailed: '没能添加照片',
     savedIn: (trip: string) => `保存在「${trip}」`,
-    autoReadOn: '自动朗读：已开启',
-    autoReadOff: '自动朗读：已关闭',
     collapse: '收起',
     knows: (photos: number, notes: number) => `已了解 ${photos} 张照片 · ${notes} 条随手记`,
     earlierHidden: '之前的对话已收起，写游记时仍会用上',
