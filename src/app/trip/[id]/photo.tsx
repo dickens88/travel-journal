@@ -13,6 +13,7 @@ import { LeafletMap } from '@/components/map/LeafletMap';
 import { Colors } from '@/constants/theme';
 import { listPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
+import { useT } from '@/i18n';
 import { locationLabel, photoDetails } from '@/photos/describe';
 import { nameLocation } from '@/photos/importPhotos';
 import { photoUri } from '@/photos/storage';
@@ -27,6 +28,7 @@ export default function PhotoViewer() {
   const { width } = useWindowDimensions();
   const all = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const jobs = useJobs(id);
+  const t = useT();
   // Page through the photos of the tapped feed card
   const photos = useMemo(() => photoGroups(all).find((g) => g.photos.some((p) => p.id === photo))?.photos ?? [], [all, photo]);
   const [index, setIndex] = useState(() => Math.max(0, photos.findIndex((p) => p.id === photo)));
@@ -41,9 +43,9 @@ export default function PhotoViewer() {
 
   if (!current) return null;
 
-  const where = locationLabel(current);
+  const where = locationLabel(current, t);
   const caption = photoAnalysis(current)?.caption;
-  const details = photoDetails(current);
+  const details = photoDetails(current, t);
   const located = current.lat != null && current.lng != null;
   const scanning = !!jobs.analyzing && !current.analysis_json;
   // One tap: the buddy describes the scene; the other attaches the photo and waits for the user's question
@@ -65,7 +67,7 @@ export default function PhotoViewer() {
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
             onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
             renderItem={({ item }) => (
-              <Pressable onPress={() => setImmersive((v) => !v)} style={{ width, height: pageHeight }} accessibilityLabel={immersive ? '显示照片信息' : '隐藏照片信息'}>
+              <Pressable onPress={() => setImmersive((v) => !v)} style={{ width, height: pageHeight }} accessibilityLabel={immersive ? t.photo.showInfo : t.photo.hideInfo}>
                 <Image source={{ uri: photoUri(item.file) }} style={StyleSheet.absoluteFill} contentFit="contain" recyclingKey={item.id} transition={120} />
               </Pressable>
             )}
@@ -77,7 +79,7 @@ export default function PhotoViewer() {
       {immersive ? null : (
         <>
           <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
-            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityLabel="关闭" style={styles.close}>
+            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityLabel={t.common.close} style={styles.close}>
               <Icon name="close" size={22} color={Colors.onDark} duo={null} />
             </Pressable>
             {photos.length > 1 ? <Text style={styles.counter}>{index + 1} / {photos.length}</Text> : null}
@@ -86,7 +88,7 @@ export default function PhotoViewer() {
             <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
               <View style={styles.whereRow}>
                 <Icon name="pin" size={16} color={located ? Colors.pop : Colors.muted} duo={null} />
-                <Text style={styles.where} numberOfLines={2}>{where ?? '这张照片没有位置信息'}</Text>
+                <Text style={styles.where} numberOfLines={2}>{where ?? t.photo.noLocation}</Text>
               </View>
               {caption ? <Text style={styles.caption}>{caption}</Text> : null}
               {!current.analysis_json ? (
@@ -95,19 +97,19 @@ export default function PhotoViewer() {
                     <Icon name="sparkle" size={14} color={Colors.pop} duo={null} />
                   </Pulse>
                   <Text style={styles.recognizeText} numberOfLines={3}>
-                    {jobs.analyzing ? `正在识别画面 ${jobs.analyzing.done}/${jobs.analyzing.total}` : jobs.error ? `${jobs.error.title}：${jobs.error.message}` : '还没识别画面内容'}
+                    {jobs.analyzing ? t.photo.analyzing(jobs.analyzing.done, jobs.analyzing.total) : jobs.error ? `${jobs.error.title}: ${jobs.error.message}` : t.photo.notAnalyzed}
                   </Text>
                   {jobs.analyzing ? (
                     <Dots size={5} />
                   ) : (
                     <Pressable onPress={() => recognizePhotos(id)} hitSlop={8} accessibilityRole="button">
-                      <Text style={styles.recognizeBtn}>{jobs.error ? '重试' : '识别'}</Text>
+                      <Text style={styles.recognizeBtn}>{jobs.error ? t.common.retry : t.photo.recognize}</Text>
                     </Pressable>
                   )}
                 </View>
               ) : null}
               {located ? (
-                <Pressable onPress={() => router.push(`/trip/${id}/map`)} style={styles.map} accessibilityLabel="在旅行地图中查看">
+                <Pressable onPress={() => router.push(`/trip/${id}/map`)} style={styles.map} accessibilityLabel={t.photo.viewOnMap}>
                   {/* Static preview: taps open the trip map instead of panning this one */}
                   <View pointerEvents="none" style={{ flex: 1 }}>
                     <LeafletMap markers={[{ id: current.id, lat: current.lat!, lng: current.lng!, label: where ?? '', kind: 'dot' }]} />
@@ -125,7 +127,7 @@ export default function PhotoViewer() {
             </ScrollView>
             {/* Pinned below the details so the buddy actions stay in reach */}
             <View style={[styles.actions, { paddingBottom: insets.bottom + 12 }]}>
-              <Button compact icon="sparkle" label="让搭子讲讲" onPress={() => askBuddy('describe')} style={{ flex: 1 }} />
+              <Button compact icon="sparkle" label={t.photo.askDescribe} onPress={() => askBuddy('describe')} style={{ flex: 1 }} />
               <AskBuddyButton compact kind="secondary" onPress={() => askBuddy()} style={{ flex: 1 }} />
             </View>
           </View>

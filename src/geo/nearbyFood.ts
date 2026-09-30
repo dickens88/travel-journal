@@ -1,5 +1,6 @@
 import { gcj02ToWgs84, inMainlandChina, wgs84ToGcj02 } from './coord';
 import { haversineKm, type LatLng } from './distance';
+import { getLang, getT } from '@/i18n';
 
 // Restaurants around the user for the buddy, from whichever source covers the spot:
 // AMap (高德) in mainland China, Google Places elsewhere, OpenStreetMap as the keyless fallback everywhere.
@@ -38,7 +39,7 @@ async function fetchJson(url: string, init: RequestInit = {}) {
     const res = await fetch(url, { ...init, signal: ctrl.signal });
     return { status: res.status, json: await res.json().catch(() => null) };
   } catch (e) {
-    throw ctrl.signal.aborted ? new Error('查询超时') : e;
+    throw ctrl.signal.aborted ? new Error(getT().errors.lookupTimeout) : e;
   } finally {
     clearTimeout(timer);
   }
@@ -53,18 +54,12 @@ const pos = (v: unknown) => {
 
 // ---- AMap: mainland China, GCJ-02 coordinates. https://lbs.amap.com/api/webservice/guide/api-advanced/newpoisearch
 
-// Errors a user can fix in Settings, in their words; others show AMap's own info code
-const AMAP_ERRORS: Record<string, string> = {
-  INVALID_USER_KEY: '高德 Key 无效，请在「设置」里检查',
-  USERKEY_PLAT_NOMATCH: '高德 Key 类型不对：需要「Web服务」类型的 Key',
-  DAILY_QUERY_OVER_LIMIT: '高德 Key 今天的查询次数用完了',
-  INSUFFICIENT_PRIVILEGES: '高德 Key 没有搜索权限',
-};
-
+// Errors a user can fix in Settings are in their words; others show AMap's own info code
 function assertAmapOk(json: any) {
   if (json?.status !== '1') {
-    const info = String(json?.info ?? '未知错误');
-    throw new Error(AMAP_ERRORS[info] ?? `高德接口出错：${info}`);
+    const t = getT();
+    const info = String(json?.info ?? t.common.unknown);
+    throw new Error(t.errors.amapCodes[info] ?? t.errors.amapError(info));
   }
 }
 
@@ -79,10 +74,10 @@ export function parseAmap(json: any): Eatery[] {
       kind: str(p.type)?.split(';').slice(1).join('/') || null,
       rating: pos(p.business?.rating),
       reviews: null,
-      price: cost ? `人均 ¥${Math.round(cost)}` : null,
+      price: cost ? getT().ai.food.perPerson(Math.round(cost)) : null,
       distanceM: Number(p.distance) || 0,
       address: [area, str(p.address)].filter(Boolean).join(' ') || null,
-      hours: hours && `今日 ${hours}`,
+      hours: hours && getT().ai.food.today(hours),
       tag: str(p.business?.tag),
     };
   });
@@ -103,19 +98,12 @@ async function amap(key: string, at: LatLng, keyword: string, radiusM: number) {
   });
   if (keyword) params.set('keywords', keyword.slice(0, 80));
   const { status, json } = await fetchJson(`https://restapi.amap.com/v5/place/around?${params}`);
-  if (status !== 200) throw new Error(`高德接口出错：HTTP ${status}`);
+  if (status !== 200) throw new Error(getT().errors.amapError(`HTTP ${status}`));
   return parseAmap(json);
 }
 
 // ---- Google Places (New): worldwide, WGS-84. https://developers.google.com/maps/documentation/places/web-service/nearby-search
 
-const PRICE: Record<string, string> = {
-  PRICE_LEVEL_FREE: '免费',
-  PRICE_LEVEL_INEXPENSIVE: '便宜',
-  PRICE_LEVEL_MODERATE: '中等价位',
-  PRICE_LEVEL_EXPENSIVE: '偏贵',
-  PRICE_LEVEL_VERY_EXPENSIVE: '很贵',
-};
 const GOOGLE_FIELDS = [
   'displayName',
   'primaryTypeDisplayName',
@@ -135,23 +123,24 @@ const GOOGLE_FIELDS = [
 const EATING = /(^|_)(restaurant|cafe|coffee_shop|bakery|bar|pub|diner|bistro|brasserie|deli|food_court|meal_takeaway|tea_house|dessert_shop|ice_cream_shop)$/;
 
 export function parseGoogle(json: any, at: LatLng, now = new Date()): Eatery[] {
-  if (json?.error) throw new Error(`Google Places 出错：${json.error.message ?? json.error.status}`);
+  const t = getT().ai.food;
+  if (json?.error) throw new Error(getT().errors.googleError(json.error.message ?? json.error.status));
   // weekdayDescriptions start on Monday
   const today = (now.getDay() + 6) % 7;
   // Text search matches words, not categories: "norwegian" also finds language schools and the opera
   const places = (json?.places ?? []).filter((p: any) => !Array.isArray(p.types) || p.types.some((t: string) => EATING.test(t)));
   return places.map((p: any) => {
     const open = p.currentOpeningHours;
-    const hours = [open?.openNow === true ? '营业中' : open?.openNow === false ? '现在没开' : null, str(open?.weekdayDescriptions?.[today])];
+    const hours = [open?.openNow === true ? t.openNow : open?.openNow === false ? t.closedNow : null, str(open?.weekdayDescriptions?.[today])];
     return {
       name: String(p.displayName?.text ?? ''),
       kind: str(p.primaryTypeDisplayName?.text),
       rating: pos(p.rating),
       reviews: pos(p.userRatingCount),
-      price: PRICE[p.priceLevel] ?? null,
+      price: t.prices[p.priceLevel] ?? null,
       distanceM: p.location ? Math.round(haversineKm(at, { lat: p.location.latitude, lng: p.location.longitude }) * 1000) : 0,
       address: str(p.shortFormattedAddress),
-      hours: hours.filter(Boolean).join('，') || null,
+      hours: hours.filter(Boolean).join(t.hoursSep) || null,
       tag: null,
     };
   });
@@ -159,10 +148,11 @@ export function parseGoogle(json: any, at: LatLng, now = new Date()): Eatery[] {
 
 async function google(key: string, at: LatLng, keyword: string, radiusM: number) {
   const circle = { center: { latitude: at.lat, longitude: at.lng }, radius: radiusM };
+  const languageCode = getT().ai.food.googleLanguage;
   // Nearby search takes no keyword; a dish or cuisine goes through text search biased to the same circle
   const [url, body] = keyword
-    ? ['searchText', { textQuery: keyword, locationBias: { circle }, pageSize: 20, languageCode: 'zh-CN' }]
-    : ['searchNearby', { includedTypes: ['restaurant', 'cafe', 'bakery'], locationRestriction: { circle }, maxResultCount: 20, rankPreference: 'POPULARITY', languageCode: 'zh-CN' }];
+    ? ['searchText', { textQuery: keyword, locationBias: { circle }, pageSize: 20, languageCode }]
+    : ['searchNearby', { includedTypes: ['restaurant', 'cafe', 'bakery'], locationRestriction: { circle }, maxResultCount: 20, rankPreference: 'POPULARITY', languageCode }];
   const { json } = await fetchJson(`https://places.googleapis.com/v1/places:${url}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': GOOGLE_FIELDS },
@@ -179,6 +169,8 @@ const OSM_AMENITIES = 'restaurant|cafe|fast_food|food_court|pub|biergarten|ice_c
 export function parseOsm(json: any, at: LatLng, keyword: string): Eatery[] {
   // OSM cuisine tags are English (italian, ramen); a Chinese keyword can't match them, so it filters nothing
   const needle = /[a-z]/i.test(keyword) ? keyword.toLowerCase() : '';
+  // The name in the app's language next to the local one, where OSM has it
+  const nameKey = `name:${getLang()}`;
   return (json?.elements ?? [])
     .map((el: any) => {
       const t = el.tags ?? {};
@@ -186,7 +178,7 @@ export function parseOsm(json: any, at: LatLng, keyword: string): Eatery[] {
       const lng = el.lon ?? el.center?.lon;
       const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ');
       return {
-        name: t['name:zh'] ? `${t['name:zh']}（${t.name}）` : String(t.name ?? ''),
+        name: t[nameKey] && t[nameKey] !== t.name ? `${t[nameKey]}（${t.name}）` : String(t.name ?? ''),
         kind: [t.amenity, t.cuisine?.replace(/;/g, '/')].filter(Boolean).join('/') || null,
         rating: null,
         reviews: null,
@@ -209,8 +201,8 @@ async function osm(at: LatLng, keyword: string, radiusM: number) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
     body: `data=${encodeURIComponent(q)}`,
   });
-  if (status === 429) throw new Error('OpenStreetMap 公共服务繁忙，稍后再试');
-  if (status !== 200) throw new Error(`OpenStreetMap 查询失败：HTTP ${status}`);
+  if (status === 429) throw new Error(getT().errors.osmBusy);
+  if (status !== 200) throw new Error(getT().errors.osmFailed(status));
   return parseOsm(json, at, keyword);
 }
 
@@ -248,10 +240,11 @@ export async function searchNearbyFood(keys: FoodKeys, at: LatLng, { keyword = '
       return { source: primary.source, places: rank(await primary.run()).slice(0, 10), radiusM: radius };
     } catch (e) {
       // Google is unreachable on mainland roaming data; OSM usually still answers
-      note = `${primary.source === 'amap' ? '高德' : 'Google'}查询失败（${reason(e)}），改用 OpenStreetMap，没有评分`;
+      const t = getT().ai.food;
+      note = t.primaryFailed(t.sources[primary.source], reason(e));
     }
   } else {
-    note = china ? '没有配置高德 Key，用的是 OpenStreetMap，国内数据较少且没有评分' : '没有配置 Google Places Key，用的是 OpenStreetMap，没有评分';
+    note = china ? getT().ai.food.noAmapKey : getT().ai.food.noGoogleKey;
   }
   return { source: 'osm', places: rank(await osm(at, kw, radius)).slice(0, 15), radiusM: radius, note };
 }
@@ -278,9 +271,9 @@ async function googlePlace(key: string, name: string): Promise<NamedPlace | null
   const { json } = await fetchJson('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.displayName,places.location' },
-    body: JSON.stringify({ textQuery: name, pageSize: 1, languageCode: 'zh-CN' }),
+    body: JSON.stringify({ textQuery: name, pageSize: 1, languageCode: getT().ai.food.googleLanguage }),
   });
-  if (json?.error) throw new Error(`Google Places 出错：${json.error.message ?? json.error.status}`);
+  if (json?.error) throw new Error(getT().errors.googleError(json.error.message ?? json.error.status));
   const p = json?.places?.[0];
   return p?.location ? { lat: p.location.latitude, lng: p.location.longitude, label: String(p.displayName?.text ?? name) } : null;
 }
@@ -288,10 +281,10 @@ async function googlePlace(key: string, name: string): Promise<NamedPlace | null
 // OSM Nominatim: no key, one request a second. It misses Chinese renderings of foreign names (奥斯陆中央车站) and
 // matches loosely, so the caller asks for local-language names and China is fenced off by country code.
 async function nominatimPlace(name: string, china: boolean): Promise<NamedPlace | null> {
-  const params = new URLSearchParams({ q: name, format: 'jsonv2', limit: '1', 'accept-language': 'zh-CN' });
+  const params = new URLSearchParams({ q: name, format: 'jsonv2', limit: '1', 'accept-language': getT().ai.food.googleLanguage });
   if (china) params.set('countrycodes', 'cn');
   const { status, json } = await fetchJson(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'User-Agent': USER_AGENT } });
-  if (status !== 200) throw new Error(`OpenStreetMap 地点查询失败：HTTP ${status}`);
+  if (status !== 200) throw new Error(getT().errors.osmPlaceFailed(status));
   const p = json?.[0];
   return p ? { lat: Number(p.lat), lng: Number(p.lon), label: String(p.name || p.display_name) } : null;
 }
@@ -312,27 +305,17 @@ export async function findPlace(keys: FoodKeys, name: string, china: boolean): P
       errors.push(reason(e));
     }
   }
-  if (errors.length === tries.filter(Boolean).length) throw new Error(errors.join('；'));
+  if (errors.length === tries.filter(Boolean).length) throw new Error(errors.join(getT().common.listSep));
   return null;
 }
 
-const SOURCE_NAME: Record<FoodSource, string> = { amap: '高德地图', google: 'Google 地图', osm: 'OpenStreetMap' };
-
-const distance = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} 公里` : `${Math.round(m / 10) * 10} 米`);
-
 // Compact text for the model: a header naming the source, then one line per place
 export function describeFood({ source, places, radiusM, note }: FoodResult, where: string) {
-  const head = [`来源：${SOURCE_NAME[source]}`, `中心：${where}`, `半径 ${radiusM} 米`, source === 'osm' ? '按距离排序' : '按评分排序'].join('｜');
+  const t = getT().ai.food;
+  const head = [t.source(t.sources[source]), t.centre(where), t.radius(radiusM), source === 'osm' ? t.byDistance : t.byRating].join('｜');
   const lines = places.map((e, i) => {
-    const facts = [
-      e.rating ? `评分 ${e.rating}${e.reviews ? `（${e.reviews} 条评价）` : ''}` : null,
-      e.price,
-      `距离 ${distance(e.distanceM)}`,
-      e.hours,
-      e.tag ? `特色：${e.tag}` : null,
-      e.address ? `地址：${e.address}` : null,
-    ];
-    return `${i + 1}. ${e.name}${e.kind ? `（${e.kind}）` : ''}｜${facts.filter(Boolean).join('｜')}`;
+    const facts = [e.rating ? t.rating(e.rating, e.reviews) : null, e.price, t.distance(e.distanceM), e.hours, e.tag ? t.tag(e.tag) : null, e.address ? t.address(e.address) : null];
+    return `${i + 1}. ${e.name}${e.kind ? t.kind(e.kind) : ''}｜${facts.filter(Boolean).join('｜')}`;
   });
-  return [head, note, lines.length ? lines.join('\n') : '这个范围内没找到餐厅，可以加大半径或换个关键词再查'].filter(Boolean).join('\n');
+  return [head, note, lines.length ? lines.join('\n') : t.none].filter(Boolean).join('\n');
 }

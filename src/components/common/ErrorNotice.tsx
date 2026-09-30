@@ -3,18 +3,20 @@ import { StyleSheet, Text, View, Pressable, type StyleProp, type ViewStyle } fro
 
 import { Button, Icon } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
+import { useT } from '@/i18n';
 
 type Props = { title: string; message: string; onRetry?: () => void; onDismiss?: () => void; style?: StyleProp<ViewStyle> };
 
 // Failure card: what was being done, the error exactly as raised, and ways forward
 export function ErrorNotice({ title, message, onRetry, onDismiss, style }: Props) {
+  const t = useT();
   return (
     <View style={[styles.box, style]} accessibilityRole="alert">
       <View style={styles.head}>
         <Icon name="warning" size={20} color={Colors.accent} />
         <Text style={styles.title}>{title}</Text>
         {onDismiss ? (
-          <Pressable onPress={onDismiss} hitSlop={10} accessibilityLabel="关闭提示">
+          <Pressable onPress={onDismiss} hitSlop={10} accessibilityLabel={t.common.close}>
             <Icon name="close" size={16} color={Colors.muted} duo={null} />
           </Pressable>
         ) : null}
@@ -23,8 +25,8 @@ export function ErrorNotice({ title, message, onRetry, onDismiss, style }: Props
         {message.trim()}
       </Text>
       <View style={styles.actions}>
-        {onRetry ? <Button compact label="重试" onPress={onRetry} /> : null}
-        <Button compact kind="secondary" label="去设置" icon="settings" onPress={() => router.push('/settings')} />
+        {onRetry ? <Button compact label={t.common.retry} onPress={onRetry} /> : null}
+        <Button compact kind="secondary" label={t.common.openSettings} icon="settings" onPress={() => router.push('/settings')} />
       </View>
     </View>
   );

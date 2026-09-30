@@ -21,8 +21,8 @@ export type Footprint = {
   cityPoints: { key: string; name: string; lat: number; lng: number }[];
 };
 
-// Aggregate every located photo across trips into countries, regions and cities
-export function computeFootprint(photos: FootPhoto[]): Footprint {
+// Aggregate every located photo across trips into countries, regions and cities; `unknown` names what the geocoder couldn't
+export function computeFootprint(photos: FootPhoto[], unknown: string): Footprint {
   const regions = new Map<string, Place & { n: number; citySet: Set<string> }>();
   const cities = new Map<string, { name: string; lat: number; lng: number; n: number }>();
   const tripDays = new Set<string>();
@@ -30,8 +30,8 @@ export function computeFootprint(photos: FootPhoto[]): Footprint {
     if (p.lat == null || p.lng == null) continue;
     const date = p.taken_at != null ? localParts(p.taken_at, p.offset_min).date : null;
     if (date) tripDays.add(`${p.trip_id}|${date}`);
-    const country = p.country ?? '未知';
-    const region = p.region ?? p.city ?? '未知';
+    const country = p.country ?? unknown;
+    const region = p.region ?? p.city ?? unknown;
     const rKey = `${country}|${region}`;
     let r = regions.get(rKey);
     if (!r) {

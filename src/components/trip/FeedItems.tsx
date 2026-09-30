@@ -7,6 +7,8 @@ import { Card, Chip, Icon, Serif } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import { deleteNote } from '@/db/repo';
 import type { Photo } from '@/db/types';
+import { lightingText } from '@/geo/lighting';
+import { useT } from '@/i18n';
 import { cameraSummary, photoExif } from '@/photos/describe';
 import { useSettings } from '@/settings/settings';
 import { photoAnalysis } from '@/trip/derive';
@@ -24,11 +26,12 @@ function openPhoto(tripId: string, photoId: string) {
 }
 
 function PhotoStrip({ photos, tripId }: { photos: Photo[]; tripId: string }) {
+  const t = useT();
   const shown = photos.slice(0, photos.length > 4 ? 3 : 4);
   return (
     <View style={styles.strip}>
       {shown.map((p) => (
-        <Pressable key={p.id} onPress={() => openPhoto(tripId, p.id)} style={styles.thumb} accessibilityRole="imagebutton" accessibilityLabel="查看大图">
+        <Pressable key={p.id} onPress={() => openPhoto(tripId, p.id)} style={styles.thumb} accessibilityRole="imagebutton" accessibilityLabel={t.feed.viewPhoto}>
           <PhotoThumb file={p.file} style={StyleSheet.absoluteFill} />
           {p.lat != null ? (
             <View style={styles.pin}>
@@ -38,7 +41,7 @@ function PhotoStrip({ photos, tripId }: { photos: Photo[]; tripId: string }) {
         </Pressable>
       ))}
       {photos.length > 4 ? (
-        <Pressable onPress={() => openPhoto(tripId, photos[3].id)} style={[styles.thumb, styles.more]} accessibilityRole="button" accessibilityLabel="查看更多照片">
+        <Pressable onPress={() => openPhoto(tripId, photos[3].id)} style={[styles.thumb, styles.more]} accessibilityRole="button" accessibilityLabel={t.feed.morePhotos}>
           <Text style={styles.moreText}>+{photos.length - 3}</Text>
         </Pressable>
       ) : null}
@@ -48,25 +51,27 @@ function PhotoStrip({ photos, tripId }: { photos: Photo[]; tripId: string }) {
 
 // Country and city rather than coordinates; spot names only when the area is still unknown
 function PhotoMeta({ photos, area, places }: { photos: Photo[]; area: string | null; places: string[] }) {
+  const t = useT();
   const located = photos.filter((p) => p.lat != null);
-  let where = area ?? places.slice(0, 2).join('、');
-  if (where && located.length && located.every((p) => p.loc_estimated)) where = `约 ${where}`;
+  let where = area ?? places.slice(0, 2).join(t.common.listSep);
+  if (where && located.length && located.every((p) => p.loc_estimated)) where = t.photo.about(where);
   const missing = photos.length - located.length;
 
   const times = photos.flatMap((p) => (p.taken_at != null ? [localParts(p.taken_at, p.offset_min).hm] : []));
   const range = times.length > 1 && times[0] !== times[times.length - 1] ? `${times[0]}–${times[times.length - 1]}` : times[0];
-  const light = [...new Set(photos.map((p) => p.lighting_tag).filter(Boolean))].slice(0, 2).join('、');
-  const camera = photos.length === 1 ? cameraSummary(photoExif(photos[0])) : '';
+  const tags = [...new Set(photos.map((p) => p.lighting_tag).filter((v): v is string => !!v))].slice(0, 2);
+  const light = tags.map((tag) => lightingText(tag, t)).join(t.common.listSep);
+  const camera = photos.length === 1 ? cameraSummary(photoExif(photos[0]), t) : '';
   const caption = photos.length === 1 ? photoAnalysis(photos[0])?.caption : undefined;
-  const info = [range ? `拍摄于 ${range}` : null, light, camera].filter(Boolean).join(' · ');
+  const info = [range ? t.feed.takenAt(range) : null, light, camera].filter(Boolean).join(' · ');
 
   return (
     <View style={{ gap: 3 }}>
       <View style={styles.metaRow}>
         <Icon name="pin" size={13} color={where ? Colors.accent : Colors.muted} duo={null} />
         <Text style={[styles.sub, { flex: 1 }]} numberOfLines={1}>
-          {where || (located.length ? '地点待识别' : '没有读取到位置信息')}
-          {where && missing ? ` · ${missing} 张无定位` : ''}
+          {where || (located.length ? t.feed.placePending : t.feed.noLocation)}
+          {where && missing ? t.feed.unlocated(missing) : ''}
         </Text>
       </View>
       {caption ? <Text style={styles.caption} numberOfLines={2}>{caption}</Text> : null}
@@ -76,22 +81,23 @@ function PhotoMeta({ photos, area, places }: { photos: Photo[]; area: string | n
 }
 
 function PhotosCard({ item, jobs, tripId }: { item: Extract<FeedItem, { kind: 'photos' }>; jobs: TripJobs; tripId: string }) {
+  const t = useT();
   const unanalyzed = item.photos.filter((p) => !p.analysis_json).length;
   const included = item.photos.every((p) => p.journal_included_at != null);
   let chip = null;
-  if (unanalyzed && jobs.analyzing) chip = <Chip tone="accent" icon="sparkle" busy label={`识别中 ${item.photos.length - unanalyzed}/${item.photos.length}`} />;
+  if (unanalyzed && jobs.analyzing) chip = <Chip tone="accent" icon="sparkle" busy label={t.feed.recognizing(item.photos.length - unanalyzed, item.photos.length)} />;
   else if (unanalyzed)
     chip = (
-      <Pressable onPress={() => recognizePhotos(tripId)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`识别 ${unanalyzed} 张照片`}>
-        <Chip tone="accent" icon="sparkle" label={`识别 ${unanalyzed} 张`} />
+      <Pressable onPress={() => recognizePhotos(tripId)} hitSlop={8} accessibilityRole="button" accessibilityLabel={t.feed.recognizeA11y(unanalyzed)}>
+        <Chip tone="accent" icon="sparkle" label={t.feed.recognize(unanalyzed)} />
       </Pressable>
     );
-  else if (included) chip = <Text style={styles.done}>已写入游记</Text>;
+  else if (included) chip = <Text style={styles.done}>{t.feed.inJournal}</Text>;
   return (
     <Card style={{ gap: 10 }}>
       <View style={styles.headRow}>
         <Icon name="photos" size={20} color={Colors.inkSoft} />
-        <Text style={styles.headText}>添加了 {item.photos.length} 张照片</Text>
+        <Text style={styles.headText}>{t.feed.photosAdded(item.photos.length)}</Text>
         {chip}
       </View>
       <PhotoStrip photos={item.photos} tripId={tripId} />
@@ -101,11 +107,12 @@ function PhotosCard({ item, jobs, tripId }: { item: Extract<FeedItem, { kind: 'p
 }
 
 function NoteCard({ item }: { item: Extract<FeedItem, { kind: 'note' }> }) {
+  const t = useT();
   const n = item.note;
   const confirmDelete = () =>
-    Alert.alert('删除这条随手记？', n.text, [
-      { text: '取消', style: 'cancel' },
-      { text: '删除', style: 'destructive', onPress: () => deleteNote(n.id) },
+    Alert.alert(t.feed.deleteNote, n.text, [
+      { text: t.common.cancel, style: 'cancel' },
+      { text: t.common.delete, style: 'destructive', onPress: () => deleteNote(n.id) },
     ]);
   return (
     <Pressable onLongPress={confirmDelete}>
@@ -114,7 +121,7 @@ function NoteCard({ item }: { item: Extract<FeedItem, { kind: 'note' }> }) {
         <View style={{ flex: 1, gap: 4 }}>
           <Serif style={{ fontSize: 15, lineHeight: 25 }}>“{n.text}”</Serif>
           <Text style={styles.sub}>
-            随手记{n.source === 'buddy' ? ' · 来自搭子对话' : ''}
+            {t.feed.note}{n.source === 'buddy' ? t.feed.fromBuddy : ''}
             {n.place_name ? ` · ${n.place_name}` : ''}
           </Text>
         </View>
@@ -125,26 +132,27 @@ function NoteCard({ item }: { item: Extract<FeedItem, { kind: 'note' }> }) {
 
 function ChatCard({ item, tripId, photos }: { item: Extract<FeedItem, { kind: 'chat' }>; tripId: string; photos: Map<string, Photo> }) {
   const { buddyAvatar } = useSettings();
+  const t = useT();
   const photo = item.photoId ? photos.get(item.photoId) : undefined;
   return (
     <Pressable onPress={() => router.push(`/trip/${tripId}/buddy`)} accessibilityRole="button">
       <Card style={{ gap: 8 }}>
         <View style={styles.headRow}>
           <BuddyAvatar value={buddyAvatar} size={22} />
-          <Text style={[styles.headText, { color: Colors.teal, fontSize: 13 }]}>和搭子聊了 {Math.max(item.turns, 1)} 轮</Text>
+          <Text style={[styles.headText, { color: Colors.teal, fontSize: 13 }]}>{t.feed.chatTurns(Math.max(item.turns, 1))}</Text>
           <Icon name="next" size={14} color={Colors.muted} duo={null} />
         </View>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           {photo ? <PhotoThumb file={photo.file} style={{ width: 52, height: 52, borderRadius: 10 }} /> : null}
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={styles.question} numberOfLines={2}>{item.question || '（照片）'}</Text>
-            {item.answer ? <Text style={styles.answer} numberOfLines={2}>搭子：{item.answer}</Text> : null}
+            <Text style={styles.question} numberOfLines={2}>{item.question || t.feed.photoOnly}</Text>
+            {item.answer ? <Text style={styles.answer} numberOfLines={2}>{t.feed.buddySaid(item.answer)}</Text> : null}
           </View>
         </View>
         {item.usedSearch || item.savedNotes ? (
           <View style={{ flexDirection: 'row', gap: 6 }}>
-            {item.usedSearch ? <Chip tone="teal" icon="web" label="联网搜索" /> : null}
-            {item.savedNotes ? <Chip tone="accent" icon="note" label={`存了 ${item.savedNotes} 条随手记`} /> : null}
+            {item.usedSearch ? <Chip tone="teal" icon="web" label={t.feed.webSearch} /> : null}
+            {item.savedNotes ? <Chip tone="accent" icon="note" label={t.feed.notesSaved(item.savedNotes)} /> : null}
           </View>
         ) : null}
       </Card>

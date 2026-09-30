@@ -17,7 +17,7 @@ import { WeatherChip } from '@/components/trip/WeatherChip';
 import { Colors, Fonts } from '@/constants/theme';
 import { getJournal, getTrip, listDays, listPhotos, pendingCounts, saveJournal } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
-import { TRANSPORT_LABEL } from '@/geo/transport';
+import { useT } from '@/i18n';
 import { deriveTrip } from '@/trip/derive';
 import { useJobs } from '@/trip/jobs';
 import { formatDayLabel, formatTripRange, tripDayNumber } from '@/utils/time';
@@ -35,6 +35,7 @@ export default function JournalScreen() {
   const journalRow = useQuery(`getJournal:${id}`, () => getJournal(id));
   const pending = useQuery(`pendingCounts:${id}`, () => pendingCounts(id));
   const jobs = useJobs(id);
+  const t = useT();
   const [draft, setDraft] = useState<Journal | null>(null);
   const saved = useMemo(() => parseJournal(journalRow?.content_json), [journalRow]);
   const { stops, stats } = useMemo(() => deriveTrip(photos), [photos]);
@@ -86,9 +87,9 @@ export default function JournalScreen() {
     );
 
   const deleteSection = (d: number, s: number, heading: string) =>
-    Alert.alert('删除这一节？', heading ? `「${heading}」的文字会从游记里去掉，照片还在旅行里。` : undefined, [
-      { text: '取消', style: 'cancel' },
-      { text: '删除', style: 'destructive', onPress: () => editSection(d, s, null) },
+    Alert.alert(t.journal.deleteSection, heading ? t.journal.deleteSectionText(heading) : undefined, [
+      { text: t.common.cancel, style: 'cancel' },
+      { text: t.common.delete, style: 'destructive', onPress: () => editSection(d, s, null) },
     ]);
 
   return (
@@ -98,27 +99,27 @@ export default function JournalScreen() {
           <PhotoThumb file={cover?.file} style={StyleSheet.absoluteFill} />
           <View style={styles.shade} />
           <View style={[styles.topBar, { top: insets.top + 6 }]}>
-            <Pressable style={styles.round} onPress={() => router.back()} accessibilityLabel="返回">
+            <Pressable style={styles.round} onPress={() => router.back()} accessibilityLabel={t.common.back}>
               <Icon name="back" size={20} />
             </Pressable>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               {journal && !jobs.generating ? (
                 <Pressable style={[styles.round, { width: 'auto', paddingHorizontal: 14 }, editing && { backgroundColor: Colors.accent }]} onPress={toggleEdit} accessibilityRole="button">
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: editing ? Colors.onDark : Colors.ink }}>{editing ? '完成' : '编辑'}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: editing ? Colors.onDark : Colors.ink }}>{editing ? t.journal.done : t.journal.edit}</Text>
                 </Pressable>
               ) : null}
-              <Pressable style={styles.round} onPress={() => router.push(`/trip/${id}/share`)} accessibilityLabel="分享">
+              <Pressable style={styles.round} onPress={() => router.push(`/trip/${id}/share`)} accessibilityLabel={t.journal.share}>
                 <Icon name="share" size={20} />
               </Pressable>
             </View>
           </View>
           <View style={styles.coverText}>
             <Text style={{ color: Colors.onDark, fontSize: 13 }}>
-              {formatTripRange(trip.start_date, trip.end_date)}
+              {formatTripRange(trip.start_date, trip.end_date, t)}
               {cities ? ` · ${cities}` : ''}
             </Text>
             {editing ? (
-              <TextInput value={draft.title} onChangeText={(title) => edit({ title })} placeholder="游记标题" placeholderTextColor="rgba(255,253,248,0.6)" style={styles.titleEdit} accessibilityLabel="游记标题" />
+              <TextInput value={draft.title} onChangeText={(title) => edit({ title })} placeholder={t.journal.titlePlaceholder} placeholderTextColor="rgba(255,253,248,0.6)" style={styles.titleEdit} accessibilityLabel={t.journal.titlePlaceholder} />
             ) : (
               <Display variant="title" style={{ color: Colors.onDark, fontSize: 30, lineHeight: 40 }}>{journal?.title ?? trip.title}</Display>
             )}
@@ -129,12 +130,12 @@ export default function JournalScreen() {
           <StatsCard stats={stats} />
           {/* Regenerating mid-edit would be overwritten by the draft on 完成 */}
           {editing ? (
-            <Text style={styles.muted}>点文字直接修改，改完点右上角「完成」。重新生成游记时会尽量保留你改过的内容。</Text>
+            <Text style={styles.muted}>{t.journal.editHint}</Text>
           ) : (
             <JournalStatusCard tripId={id} hasJournal={!!journal} hasPhotos={photos.length > 0} pending={pending} jobs={jobs} />
           )}
           {editing ? (
-            <EditBox value={draft.summary} onChangeText={(summary) => edit({ summary })} placeholder="全程概述" style={styles.summary} />
+            <EditBox value={draft.summary} onChangeText={(summary) => edit({ summary })} placeholder={t.journal.summaryPlaceholder} style={styles.summary} />
           ) : journal?.summary ? (
             <Serif style={styles.summary}>{journal.summary}</Serif>
           ) : null}
@@ -144,8 +145,8 @@ export default function JournalScreen() {
               <View key={day.date + di} style={{ gap: 16 }}>
                 <View style={styles.dayHead}>
                   <View>
-                    <Display variant="title" style={{ fontSize: 24, lineHeight: 32 }}>{n >= 1 ? `第 ${n} 天` : day.date}</Display>
-                    <Text style={styles.muted}>{formatDayLabel(day.date)}</Text>
+                    <Display variant="title" style={{ fontSize: 24, lineHeight: 32 }}>{n >= 1 ? t.time.dayN(n) : day.date}</Display>
+                    <Text style={styles.muted}>{formatDayLabel(day.date, t)}</Text>
                   </View>
                   <WeatherChip day={weather.get(day.date)} />
                 </View>
@@ -163,9 +164,9 @@ export default function JournalScreen() {
                         </View>
                         {editing ? (
                           <>
-                            <EditBox value={sec.heading} onChangeText={(heading) => editSection(di, si, { heading })} placeholder="小标题" multiline={false} style={styles.headingEdit} />
-                            <Pressable onPress={() => deleteSection(di, si, sec.heading)} hitSlop={8} accessibilityRole="button" accessibilityLabel="删除这一节">
-                              <Text style={styles.delete}>删除</Text>
+                            <EditBox value={sec.heading} onChangeText={(heading) => editSection(di, si, { heading })} placeholder={t.journal.headingPlaceholder} multiline={false} style={styles.headingEdit} />
+                            <Pressable onPress={() => deleteSection(di, si, sec.heading)} hitSlop={8} accessibilityRole="button" accessibilityLabel={t.journal.deleteSection}>
+                              <Text style={styles.delete}>{t.common.delete}</Text>
                             </Pressable>
                           </>
                         ) : (
@@ -188,7 +189,7 @@ export default function JournalScreen() {
                           <View style={styles.legLine} />
                           <Icon name={TRANSPORT_ICON[leg.transport]} size={20} color={Colors.teal} />
                           <Text style={{ fontSize: 13, color: Colors.teal }}>
-                            {TRANSPORT_LABEL[leg.transport]} {leg.km.toFixed(1)} km{leg.minutes ? ` · ${Math.round(leg.minutes)} 分钟` : ''}
+                            {t.transport[leg.transport]} {leg.km.toFixed(1)} km{leg.minutes ? ` · ${t.time.minutes(Math.round(leg.minutes))}` : ''}
                           </Text>
                         </View>
                       ) : null}
@@ -203,7 +204,7 @@ export default function JournalScreen() {
       </ScrollView>
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
         <AskBuddyButton kind="secondary" onPress={() => router.push(`/trip/${id}/buddy`)} style={{ flex: 1 }} />
-        <Button label="分享游记" icon="share" onPress={() => router.push(`/trip/${id}/share`)} style={{ flex: 1 }} disabled={!journal} />
+        <Button label={t.journal.shareJournal} icon="share" onPress={() => router.push(`/trip/${id}/share`)} style={{ flex: 1 }} disabled={!journal} />
       </View>
     </View>
   );

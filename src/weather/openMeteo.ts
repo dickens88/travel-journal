@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/common/icons';
+import { getT, type Messages } from '@/i18n';
 import { daysBetween, todayISO } from '@/utils/time';
 
 export type DailyWeather = { date: string; code: number; tmax: number; tmin: number };
@@ -20,20 +21,27 @@ export function parseDaily(json: any): DailyWeather[] {
 
 export async function fetchDailyWeather(lat: number, lng: number, start: string, end: string) {
   const res = await fetch(buildWeatherUrl(lat, lng, start, end));
-  if (!res.ok) throw new Error(`天气查询失败 ${res.status}`);
+  if (!res.ok) throw new Error(getT().errors.weatherFetchFailed(res.status));
   return parseDaily(await res.json());
 }
 
 // WMO weather code -> label and icon
-export function weatherLabel(code: number): { label: string; symbol: IconName } {
-  if (code === 0) return { label: '晴', symbol: 'sun' };
-  if (code <= 2) return { label: '晴间多云', symbol: 'sunCloud' };
-  if (code === 3) return { label: '阴', symbol: 'cloud' };
-  if (code <= 48) return { label: '雾', symbol: 'fog' };
-  if (code <= 57) return { label: '毛毛雨', symbol: 'drizzle' };
-  if (code <= 67) return { label: '雨', symbol: 'rain' };
-  if (code <= 77) return { label: '雪', symbol: 'snow' };
-  if (code <= 82) return { label: '阵雨', symbol: 'shower' };
-  if (code <= 86) return { label: '阵雪', symbol: 'snowShower' };
-  return { label: '雷雨', symbol: 'storm' };
+export function weatherLabel(code: number, t: Messages): { label: string; symbol: IconName } {
+  const [key, symbol] = weatherOf(code);
+  return { label: t.weather[key], symbol };
+}
+
+type WeatherKey = keyof Messages['weather'];
+
+function weatherOf(code: number): [WeatherKey, IconName] {
+  if (code === 0) return ['clear', 'sun'];
+  if (code <= 2) return ['partlyCloudy', 'sunCloud'];
+  if (code === 3) return ['overcast', 'cloud'];
+  if (code <= 48) return ['fog', 'fog'];
+  if (code <= 57) return ['drizzle', 'drizzle'];
+  if (code <= 67) return ['rain', 'rain'];
+  if (code <= 77) return ['snow', 'snow'];
+  if (code <= 82) return ['showers', 'shower'];
+  if (code <= 86) return ['snowShowers', 'snowShower'];
+  return ['storm', 'storm'];
 }

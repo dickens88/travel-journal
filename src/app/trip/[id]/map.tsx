@@ -11,6 +11,7 @@ import { WeatherChip } from '@/components/trip/WeatherChip';
 import { Colors } from '@/constants/theme';
 import { getTrip, listDays, listPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
+import { useT } from '@/i18n';
 import type { Stop } from '@/geo/cluster';
 import type { LatLng } from '@/geo/distance';
 import { useThumbs } from '@/photos/thumbs';
@@ -28,19 +29,20 @@ function arc(a: LatLng, b: LatLng, n = 24): LatLng[] {
 }
 
 function Legend() {
+  const t = useT();
   return (
     <View style={styles.legend}>
       <View style={styles.legendRow}>
         <Svg width={26} height={6}><Line x1={2} y1={3} x2={24} y2={3} stroke={Colors.teal} strokeWidth={3} strokeLinecap="round" /></Svg>
-        <Text style={styles.legendText}>步行</Text>
+        <Text style={styles.legendText}>{t.transport.walk}</Text>
       </View>
       <View style={styles.legendRow}>
         <Svg width={26} height={6}><Line x1={2} y1={3} x2={24} y2={3} stroke={Colors.teal} strokeWidth={3} strokeDasharray="5 4" strokeLinecap="round" /></Svg>
-        <Text style={styles.legendText}>乘车</Text>
+        <Text style={styles.legendText}>{t.transport.transit}</Text>
       </View>
       <View style={styles.legendRow}>
         <Svg width={26} height={12}><Path d="M2 10 Q 13 -2 24 10" stroke={Colors.accent} strokeWidth={2.5} fill="none" strokeDasharray="2 4" strokeLinecap="round" /></Svg>
-        <Text style={styles.legendText}>飞行</Text>
+        <Text style={styles.legendText}>{t.transport.flight}</Text>
       </View>
     </View>
   );
@@ -54,6 +56,7 @@ export default function TripMapScreen() {
   const photos = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const days = useQuery(`listDays:${id}`, () => listDays(id));
   const [day, setDay] = useState<string | null>(null);
+  const t = useT();
 
   const allStops = stopsFromPhotos(photos);
   const dates = [...new Set(allStops.map((s) => s.date))];
@@ -92,21 +95,21 @@ export default function TripMapScreen() {
 
       <View style={[styles.top, { paddingTop: insets.top + 6 }]}>
         <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-          <Pressable style={styles.round} onPress={() => router.replace(`/trip/${id}`)} accessibilityLabel="返回旅行">
+          <Pressable style={styles.round} onPress={() => router.replace(`/trip/${id}`)} accessibilityLabel={t.map.backToTrip}>
             <Icon name="back" size={20} />
           </Pressable>
           <View style={styles.titleChip}>
             <Display variant="subheading" style={{ fontSize: 16, lineHeight: 21 }} numberOfLines={1}>{trip.title}</Display>
-            <Text style={{ fontSize: 12, color: Colors.muted }}>{allStops.length} 个停留点</Text>
+            <Text style={{ fontSize: 12, color: Colors.muted }}>{t.map.stops(allStops.length)}</Text>
           </View>
-          <Pressable style={styles.round} onPress={() => map.current?.fit()} accessibilityLabel="显示全部">
+          <Pressable style={styles.round} onPress={() => map.current?.fit()} accessibilityLabel={t.map.fitAll}>
             <Icon name="fit" size={20} />
           </Pressable>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
           {[null, ...dates].map((d) => {
             const on = d === day;
-            const label = d ? `第${tripDayNumber(trip.start_date, d)}天` : '全部';
+            const label = d ? t.time.dayNShort(tripDayNumber(trip.start_date, d)) : t.map.all;
             return (
               <Pressable key={d ?? 'all'} onPress={() => setDay(d)} style={[styles.dayChip, on && { backgroundColor: Colors.ink }]}>
                 <Text style={{ fontSize: 13, color: on ? Colors.onDark : Colors.ink }}>{label}</Text>
@@ -123,25 +126,25 @@ export default function TripMapScreen() {
       <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.sheetHead}>
           <View style={{ flex: 1 }}>
-            <Display>{day ? `第 ${tripDayNumber(trip.start_date, day)} 天 · ${formatDayLabel(day)}` : '全程'}</Display>
+            <Display>{day ? `${t.time.dayN(tripDayNumber(trip.start_date, day))} · ${formatDayLabel(day, t)}` : t.map.wholeTrip}</Display>
             <Text style={{ fontSize: 12, color: Colors.muted, marginTop: 2 }}>
-              {stops.length} 个停留点 · 步行 {km('walk').toFixed(1)} km · 乘车 {km('transit').toFixed(1)} km
-              {km('flight') ? ` · 飞行 ${Math.round(km('flight'))} km` : ''}
+              {t.map.summary(stops.length, km('walk').toFixed(1), km('transit').toFixed(1))}
+              {km('flight') ? t.map.flight(Math.round(km('flight'))) : ''}
             </Text>
           </View>
           {day ? <WeatherChip day={weather.get(day)} /> : null}
         </View>
         {stops.length === 0 ? (
-          <Text style={{ fontSize: 14, color: Colors.muted, paddingVertical: 20 }}>还没有带定位的照片</Text>
+          <Text style={{ fontSize: 14, color: Colors.muted, paddingVertical: 20 }}>{t.map.noLocatedPhotos}</Text>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 20 }}>
             {stops.map((s, i) => {
-              const t = localParts(s.start, s.offsetMin);
+              const at = localParts(s.start, s.offsetMin);
               return (
                 <Pressable key={s.id} style={{ width: 148, gap: 6 }} onPress={() => focus(s)}>
                   <PhotoThumb file={photoMap.get(s.photoIds[0])?.file} style={{ height: 96, borderRadius: 12 }} />
-                  <Text style={{ fontSize: 14, fontWeight: '700' }} numberOfLines={1}>{i + 1} · {s.placeName ?? '未知地点'}</Text>
-                  <Text style={{ fontSize: 12, color: Colors.muted }}>{day ? t.hm : `${t.date.slice(5)} ${t.hm}`} · {s.photoIds.length} 张</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700' }} numberOfLines={1}>{i + 1} · {s.placeName ?? t.common.unknownPlace}</Text>
+                  <Text style={{ fontSize: 12, color: Colors.muted }}>{day ? at.hm : `${at.date.slice(5)} ${at.hm}`} · {t.trips.photos(s.photoIds.length)}</Text>
                 </Pressable>
               );
             })}

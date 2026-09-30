@@ -1,6 +1,7 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { Colors, Fonts } from '@/constants/theme';
+import { useT } from '@/i18n';
 
 // Rendered from Phosphor by scripts/gen-icons.js; white templates tinted by the tab bar
 const ICONS = {
@@ -10,6 +11,7 @@ const ICONS = {
 };
 
 export default function TabsLayout() {
+  const t = useT();
   return (
     <NativeTabs
       tintColor={Colors.accent}
@@ -18,15 +20,15 @@ export default function TabsLayout() {
       backgroundColor={Colors.card}
       labelStyle={{ default: { fontFamily: Fonts.display, fontSize: 12, color: Colors.muted }, selected: { fontFamily: Fonts.display, fontSize: 12, color: Colors.accent } }}>
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>旅行</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t.tabs.trips}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon src={ICONS.trips} />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="footprint">
-        <NativeTabs.Trigger.Label>足迹</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t.tabs.footprint}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon src={ICONS.footprint} />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
-        <NativeTabs.Trigger.Label>设置</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t.tabs.settings}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon src={ICONS.settings} />
       </NativeTabs.Trigger>
     </NativeTabs>

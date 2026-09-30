@@ -1,5 +1,6 @@
 import { getPosition } from 'suncalc';
 
+import type { Messages } from '@/i18n';
 import type { ParsedExif } from '@/photos/exif';
 
 function sunAltitudeDeg(ms: number, lat: number, lng: number) {
@@ -14,7 +15,7 @@ function ev100(exif: ParsedExif) {
   return Math.log2((n * n) / t) - Math.log2(iso / 100);
 }
 
-// Combine sun position with EXIF exposure hints into a short Chinese tag
+// Combine sun position with EXIF exposure hints into a short tag. Stored in Chinese; lightingText translates it for display
 export function describeLighting(takenAt: number | null, lat: number | null, lng: number | null, exif: ParsedExif): string {
   const alt = takenAt != null && lat != null && lng != null ? sunAltitudeDeg(takenAt, lat, lng) : null;
   // Prefer the exposure triangle: some phones write BrightnessValue 0 as a placeholder
@@ -31,4 +32,12 @@ export function describeLighting(takenAt: number | null, lat: number | null, lng
   else tag = '日光';
   if (exif.flash) tag = tag ? `${tag} · 闪光` : '闪光';
   return tag;
+}
+
+// A stored lighting tag in the UI language; parts it doesn't know (older or model-written text) pass through
+export function lightingText(tag: string, t: Messages) {
+  return tag
+    .split(' · ')
+    .map((part) => t.lighting[part] ?? part)
+    .join(' · ');
 }

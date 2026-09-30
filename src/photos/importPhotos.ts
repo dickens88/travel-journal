@@ -12,6 +12,7 @@ import type { Photo } from '@/db/types';
 import { interpolateMissing } from '@/geo/interpolate';
 import { describeLighting } from '@/geo/lighting';
 import { currentPosition, placeName } from '@/geo/place';
+import { getT } from '@/i18n';
 import { setJob } from '@/trip/jobs';
 import { newId } from '@/utils/id';
 import { deviceOffsetMin } from '@/utils/time';
@@ -37,7 +38,7 @@ const toSource = (a: ImagePicker.ImagePickerAsset): ImportSource => ({ uri: a.ur
 // comes from where the phone is right now; it was taken this moment, after all.
 export async function takePhoto(): Promise<ImportSource[]> {
   const perm = await ImagePicker.requestCameraPermissionsAsync();
-  if (!perm.granted) throw new Error('没有相机权限，在系统设置里允许旅迹使用相机后再试');
+  if (!perm.granted) throw new Error(getT().errors.noCamera);
   const res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], exif: true, quality: 1 });
   if (res.canceled) return [];
   const location = await currentPosition();
@@ -110,7 +111,7 @@ export async function importLibrary(tripId: string, assetIds: string[]) {
   const results = await Promise.allSettled(assetIds.map(sourceFromLibrary));
   const sources = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
   if (!sources.length) {
-    setJob(tripId, { importing: undefined, error: { title: '导入照片失败', message: '这些照片读取不了，试试用系统相册选择' } });
+    setJob(tripId, { importing: undefined, error: { title: getT().errors.importFailed, message: getT().errors.unreadablePhotos } });
     return;
   }
   await importAssets(tripId, sources);

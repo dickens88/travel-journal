@@ -5,21 +5,22 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CLAUDE_MODELS, DEFAULT_MODEL } from '@/ai/client';
-import { DEFAULT_VOICE, TTS_VOICES } from '@/ai/cloudTts';
+import { DEFAULT_VOICE } from '@/ai/cloudTts';
 import { isArk } from '@/ai/openai';
 import { BuddyAvatar } from '@/components/buddy/BuddyAvatar';
-import { Display, Icon, type IconName } from '@/components/common/ui';
+import { Display, Icon, Segmented, type IconName } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
-import { aiConfigured, saveSettings, useSettings, useSettingsReady, type Settings } from '@/settings/settings';
+import { LANGS, LOCALES, useLangPref, useT, type LangPref, type Messages } from '@/i18n';
+import { aiConfigured, saveSettings, setLanguage, useSettings, useSettingsReady, type Settings } from '@/settings/settings';
 
 export default function SettingsScreen() {
   // Secure store loads asynchronously; the summaries need the saved values
   return useSettingsReady() ? <Overview /> : null;
 }
 
-function modelLabel(s: Settings) {
+function modelLabel(s: Settings, t: Messages) {
   if (s.provider === 'openai') {
-    const vendor = isArk(s.openaiBaseURL) ? '火山方舟' : 'OpenAI 兼容';
+    const vendor = isArk(s.openaiBaseURL) ? t.settings.ark : t.settings.openaiCompatible;
     return s.openaiModel ? `${vendor} · ${s.openaiModel}` : vendor;
   }
   const id = s.anthropicModel.trim() || DEFAULT_MODEL;
@@ -29,22 +30,24 @@ function modelLabel(s: Settings) {
 function Overview() {
   const insets = useSafeAreaInsets();
   const settings = useSettings();
-  const model = { ready: aiConfigured(settings), value: modelLabel(settings) };
-  const voice = settings.ttsKey ? `豆包 · ${TTS_VOICES.find((v) => v.id === (settings.ttsVoice || DEFAULT_VOICE))?.label ?? '云端'}` : '手机语音';
-  const maps = [settings.amapKey && '高德', settings.googlePlacesKey && 'Google'].filter(Boolean).join(' · ') || 'OpenStreetMap';
+  const t = useT();
+  const langPref = useLangPref();
+  const model = { ready: aiConfigured(settings), value: modelLabel(settings, t) };
+  const voice = settings.ttsKey ? `${t.settings.doubao} · ${t.voice.voices[settings.ttsVoice || DEFAULT_VOICE] ?? t.settings.cloud}` : t.settings.phoneVoice;
+  const maps = [settings.amapKey && t.settings.amap, settings.googlePlacesKey && 'Google'].filter(Boolean).join(' · ') || 'OpenStreetMap';
 
   return (
     <ScrollView style={{ backgroundColor: Colors.paper }} contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100, paddingHorizontal: 20, gap: 22 }}>
       <Display variant="hero" marker>
-        设置
+        {t.settings.title}
       </Display>
 
       {!model.ready ? (
         <Pressable onPress={() => router.push('/settings/model')} style={({ pressed }) => [styles.setup, pressed && { opacity: 0.8 }]} accessibilityRole="button">
           <Icon name="sparkle" size={26} color={Colors.onDark} duo={Colors.pop} />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.setupTitle}>先接上 AI 模型</Text>
-            <Text style={styles.setupText}>填好 API Key，搭子、识图和写游记才能用</Text>
+            <Text style={styles.setupTitle}>{t.settings.setupTitle}</Text>
+            <Text style={styles.setupText}>{t.settings.setupText}</Text>
           </View>
           <Icon name="next" size={16} color={Colors.onDark} duo={null} />
         </Pressable>
@@ -56,31 +59,43 @@ function Overview() {
           <BuddyAvatar value={settings.buddyAvatar} size={60} />
         </View>
         <View style={{ flex: 1, gap: 2 }}>
-          <Display variant="heading">旅行搭子</Display>
+          <Display variant="heading">{t.settings.buddy}</Display>
           <Text style={styles.value} numberOfLines={1}>
-            {settings.buddyPrompt ? '自定义性格' : '默认性格'} · 换头像、改脾气
+            {settings.buddyPrompt ? t.settings.customPersona : t.settings.defaultPersona} · {t.settings.buddyHint}
           </Text>
         </View>
         <Icon name="next" size={16} color={Colors.muted} duo={null} />
       </Pressable>
 
-      <Group title="大脑">
-        <Row icon="sparkle" title="AI 模型" value={model.value} href="/settings/model" badge={model.ready ? null : '未配置'} />
+      <Group title={t.settings.language}>
+        <View style={styles.language}>
+          <Segmented<LangPref>
+            // Each language by its own name, so it can be found whatever the current one is
+            options={[{ value: 'system', label: t.settings.followSystem }, ...LANGS.map((l) => ({ value: l, label: LOCALES[l].name }))]}
+            value={langPref}
+            onChange={setLanguage}
+          />
+          <Text style={styles.value}>{t.settings.languageHint}</Text>
+        </View>
       </Group>
 
-      <Group title="搭子的本事">
+      <Group title={t.settings.brain}>
+        <Row icon="sparkle" title={t.settings.aiModel} value={model.value} href="/settings/model" badge={model.ready ? null : t.settings.notSet} />
+      </Group>
+
+      <Group title={t.settings.skills}>
         <Row
           icon="speaker"
-          title="朗读回复"
-          value={`${settings.tts ? '自动朗读' : '手动朗读'} · ${voice}`}
+          title={t.settings.readAloud}
+          value={`${settings.tts ? t.settings.autoRead : t.settings.manualRead} · ${voice}`}
           href="/settings/voice"
           trailing={<Switch value={settings.tts} onValueChange={(v) => saveSettings({ tts: v })} trackColor={{ true: Colors.accent }} thumbColor={Colors.card} />}
         />
-        <Row icon="food" title="附近美食" value={maps} href="/settings/food" />
+        <Row icon="food" title={t.settings.food} value={maps} href="/settings/food" />
       </Group>
 
       <View style={styles.colophon}>
-        <Text style={styles.value}>照片会压缩后发送给模型识别内容，其余数据只保存在这台手机上。</Text>
+        <Text style={styles.value}>{t.settings.privacy}</Text>
         <Text style={[styles.value, { fontSize: 11 }]}>
           {Constants.expoConfig?.name} v{Constants.expoConfig?.version}
         </Text>
@@ -139,6 +154,7 @@ const styles = StyleSheet.create({
   buddyBand: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, backgroundColor: Colors.pop },
   buddyRing: { padding: 3, borderRadius: 36, backgroundColor: Colors.popSoft },
   groupTitle: { fontSize: 13, fontWeight: '600', color: Colors.muted, paddingHorizontal: 4, letterSpacing: 0.5 },
+  language: { gap: 8, padding: 12 },
   group: { borderRadius: 16, overflow: 'hidden', backgroundColor: Colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.line },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.line, marginBottom: -StyleSheet.hairlineWidth },
   rowIcon: { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.paper },

@@ -13,6 +13,7 @@ import { WeatherChip } from '@/components/trip/WeatherChip';
 import { Colors } from '@/constants/theme';
 import { getJournal, getTrip, listChat, listDays, listNotes, listPhotos, pendingCounts, updateTrip } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
+import { useT } from '@/i18n';
 import { buildFeed } from '@/trip/feed';
 import { useJobs } from '@/trip/jobs';
 import { removeTrip } from '@/trip/remove';
@@ -29,6 +30,7 @@ export default function TripFeedScreen() {
   const hasJournal = useQuery(`hasJournal:${id}`, () => !!getJournal(id));
   const pending = useQuery(`pendingCounts:${id}`, () => pendingCounts(id));
   const jobs = useJobs(id);
+  const t = useT();
   const [renaming, setRenaming] = useState<string | null>(null);
   // Job progress re-renders this screen per photo; only rebuild when the data changes
   const feed = useMemo(() => buildFeed(photos, notes, chats), [photos, notes, chats]);
@@ -39,10 +41,10 @@ export default function TripFeedScreen() {
   if (!trip) return null;
 
   const confirmDelete = () =>
-    Alert.alert('删除这段旅行？', '照片副本、随手记、对话和游记都会删除，相册里的原图不受影响。', [
-      { text: '取消', style: 'cancel' },
+    Alert.alert(t.trip.deleteTitle, t.trip.deleteText, [
+      { text: t.common.cancel, style: 'cancel' },
       {
-        text: '删除',
+        text: t.common.delete,
         style: 'destructive',
         onPress: () => {
           removeTrip(id);
@@ -53,9 +55,9 @@ export default function TripFeedScreen() {
 
   const openMenu = () =>
     Alert.alert(trip.title, undefined, [
-      { text: '重命名', onPress: () => setRenaming(trip.title) },
-      { text: '删除旅行', style: 'destructive', onPress: confirmDelete },
-      { text: '取消', style: 'cancel' },
+      { text: t.trip.rename, onPress: () => setRenaming(trip.title) },
+      { text: t.trip.deleteTrip, style: 'destructive', onPress: confirmDelete },
+      { text: t.common.cancel, style: 'cancel' },
     ]);
 
   const saveName = () => {
@@ -68,7 +70,7 @@ export default function TripFeedScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable onPress={openMenu} accessibilityLabel="更多" hitSlop={10}>
+            <Pressable onPress={openMenu} accessibilityLabel={t.trip.more} hitSlop={10}>
               <Icon name="more" size={22} />
             </Pressable>
           ),
@@ -78,7 +80,7 @@ export default function TripFeedScreen() {
         <View style={styles.header}>
           <Display variant="title">{trip.title}</Display>
           <Text style={styles.meta}>
-            {formatDateDots(trip.start_date)} 起 · {photos.length} 张照片 · {notes.length} 条随手记 · {userTurns} 次提问
+            {t.trip.meta(formatDateDots(trip.start_date), photos.length, notes.length, userTurns)}
           </Text>
         </View>
         <TripTabs tripId={id} active="feed" />
@@ -86,15 +88,15 @@ export default function TripFeedScreen() {
           <JournalStatusCard tripId={id} hasJournal={hasJournal} hasPhotos={photos.length > 0} pending={pending} jobs={jobs} />
           {jobs.importing ? (
             <View style={styles.importing}>
-              <Text style={styles.meta}>正在导入照片 {jobs.importing.done}/{jobs.importing.total}</Text>
+              <Text style={styles.meta}>{t.trip.importing(jobs.importing.done, jobs.importing.total)}</Text>
               <ProgressBar value={jobs.importing.done / jobs.importing.total} />
             </View>
           ) : null}
           {feed.length === 0 && !jobs.importing ? (
             <View style={styles.empty}>
               <Icon name="footprints" size={44} color={Colors.muted} />
-              <Display variant="subheading" style={{ marginTop: 8 }}>从这里开始记录</Display>
-              <Text style={styles.meta}>添加照片、写一句随手记，或者问问旅行搭子</Text>
+              <Display variant="subheading" style={{ marginTop: 8 }}>{t.trip.emptyTitle}</Display>
+              <Text style={styles.meta}>{t.trip.emptyText}</Text>
             </View>
           ) : null}
           {feed.map((day) => {
@@ -103,8 +105,8 @@ export default function TripFeedScreen() {
               <View key={day.date} style={{ gap: 12 }}>
                 <View style={styles.dayHead}>
                   <View style={styles.dayTitle}>
-                    {n >= 1 ? <Display>第 {n} 天</Display> : null}
-                    <Text style={styles.dayDate}>{formatDayLabel(day.date)}</Text>
+                    {n >= 1 ? <Display>{t.time.dayN(n)}</Display> : null}
+                    <Text style={styles.dayDate}>{formatDayLabel(day.date, t)}</Text>
                   </View>
                   <WeatherChip day={weather.get(day.date)} />
                 </View>
@@ -121,17 +123,17 @@ export default function TripFeedScreen() {
         style={[styles.fab, { bottom: insets.bottom + 84 }]}
       />
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
-        <Button kind="secondary" label="添加照片" icon="addPhoto" onPress={() => router.push(`/trip/${id}/pick`)} style={{ flex: 1 }} loading={!!jobs.importing} />
-        <Button kind="secondary" label="随手记" icon="note" onPress={() => router.push(`/trip/${id}/note`)} style={{ flex: 1 }} />
+        <Button kind="secondary" label={t.trip.addPhotos} icon="addPhoto" onPress={() => router.push(`/trip/${id}/pick`)} style={{ flex: 1 }} loading={!!jobs.importing} />
+        <Button kind="secondary" label={t.trip.note} icon="note" onPress={() => router.push(`/trip/${id}/note`)} style={{ flex: 1 }} />
       </View>
       <Modal visible={renaming !== null} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
         <View style={styles.backdrop}>
           <View style={styles.dialog}>
-            <Display>重命名旅行</Display>
-            <TextInput autoFocus value={renaming ?? ''} onChangeText={setRenaming} onSubmitEditing={saveName} style={styles.nameInput} accessibilityLabel="旅行名称" />
+            <Display>{t.trip.renameTitle}</Display>
+            <TextInput autoFocus value={renaming ?? ''} onChangeText={setRenaming} onSubmitEditing={saveName} style={styles.nameInput} accessibilityLabel={t.newTrip.name} />
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Button kind="secondary" label="取消" onPress={() => setRenaming(null)} style={{ flex: 1 }} />
-              <Button label="保存" onPress={saveName} style={{ flex: 1 }} />
+              <Button kind="secondary" label={t.common.cancel} onPress={() => setRenaming(null)} style={{ flex: 1 }} />
+              <Button label={t.common.save} onPress={saveName} style={{ flex: 1 }} />
             </View>
           </View>
         </View>

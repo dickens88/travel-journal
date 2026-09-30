@@ -7,56 +7,58 @@ import { Button, Display, Icon } from '@/components/common/ui';
 import { Colors, Fonts } from '@/constants/theme';
 import { listTrips, type TripSummary } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
+import { useT, type Messages } from '@/i18n';
 import { formatTripRange, localParts, tripDayNumber } from '@/utils/time';
 
-function tripMeta(t: TripSummary) {
-  const lastDate = t.end_date ?? (t.last_taken ? localParts(t.last_taken).date : null);
-  const end = lastDate && lastDate > t.start_date ? lastDate : null;
-  const range = formatTripRange(t.start_date, end);
-  const days = end ? tripDayNumber(t.start_date, end) : 1;
-  return [range, `${days} 天`, `${t.photo_count} 张`];
+function tripMeta(trip: TripSummary, t: Messages) {
+  const lastDate = trip.end_date ?? (trip.last_taken ? localParts(trip.last_taken).date : null);
+  const end = lastDate && lastDate > trip.start_date ? lastDate : null;
+  const range = formatTripRange(trip.start_date, end, t);
+  const days = end ? tripDayNumber(trip.start_date, end) : 1;
+  return [range, t.trips.days(days), t.trips.photos(trip.photo_count)];
 }
 
-function status(t: TripSummary) {
-  if (!t.has_journal) return { label: t.photo_count ? '还没写游记' : '刚创建', accent: true };
-  if (t.pending_count > 0) return { label: `${t.pending_count} 条新内容待写入`, accent: false };
-  return { label: '游记已生成', accent: false };
+function status(trip: TripSummary, t: Messages) {
+  if (!trip.has_journal) return { label: trip.photo_count ? t.trips.noJournal : t.trips.justCreated, accent: true };
+  if (trip.pending_count > 0) return { label: t.trips.pending(trip.pending_count), accent: false };
+  return { label: t.trips.journalDone, accent: false };
 }
 
 export default function TripsScreen() {
   const insets = useSafeAreaInsets();
+  const t = useT();
   const trips = useQuery('listTrips', listTrips);
-  const photoTotal = trips.reduce((s, t) => s + t.photo_count, 0);
+  const photoTotal = trips.reduce((sum, trip) => sum + trip.photo_count, 0);
 
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 160, paddingHorizontal: 20, gap: 16 }}>
-        <Text style={styles.brand}>旅迹</Text>
+        <Text style={styles.brand}>{t.common.appName}</Text>
         <View>
-          <Display variant="hero" marker>我的旅行</Display>
-          <Text style={styles.sub}>{trips.length ? `${trips.length} 段旅程 · ${photoTotal} 张照片` : '把每段旅程的照片、随手记和聊天都收进来'}</Text>
+          <Display variant="hero" marker>{t.trips.title}</Display>
+          <Text style={styles.sub}>{trips.length ? t.trips.summary(trips.length, photoTotal) : t.trips.intro}</Text>
         </View>
         {trips.length === 0 ? (
           <View style={styles.empty}>
             <Icon name="suitcase" size={48} color={Colors.muted} />
-            <Display variant="subheading" style={{ marginTop: 8 }}>还没有旅行</Display>
-            <Text style={styles.sub}>新建一段旅行，照片可以边走边加</Text>
+            <Display variant="subheading" style={{ marginTop: 8 }}>{t.trips.emptyTitle}</Display>
+            <Text style={styles.sub}>{t.trips.emptyText}</Text>
           </View>
         ) : null}
-        {trips.map((t) => {
-          const s = status(t);
+        {trips.map((trip) => {
+          const s = status(trip, t);
           return (
-            <Pressable key={t.id} style={styles.card} onPress={() => router.push(`/trip/${t.id}`)} accessibilityRole="button" accessibilityLabel={t.title}>
+            <Pressable key={trip.id} style={styles.card} onPress={() => router.push(`/trip/${trip.id}`)} accessibilityRole="button" accessibilityLabel={trip.title}>
               <View>
-                <PhotoThumb file={t.cover_file} style={styles.cover} />
+                <PhotoThumb file={trip.cover_file} style={styles.cover} />
                 <View style={[styles.badge, s.accent && { backgroundColor: Colors.accent }]}>
                   <Text style={styles.badgeText}>{s.label}</Text>
                 </View>
               </View>
               <View style={styles.cardBody}>
-                <Display variant="heading" numberOfLines={1}>{t.title}</Display>
+                <Display variant="heading" numberOfLines={1}>{trip.title}</Display>
                 <View style={styles.metaRow}>
-                  {tripMeta(t).map((m) => (
+                  {tripMeta(trip, t).map((m) => (
                     <Text key={m} style={styles.meta}>{m}</Text>
                   ))}
                 </View>
@@ -65,7 +67,7 @@ export default function TripsScreen() {
           );
         })}
       </ScrollView>
-      <Button label="新建旅行" icon="add" onPress={() => router.push('/trip/new')} style={[styles.fab, { bottom: insets.bottom + 70 }]} />
+      <Button label={t.trips.newTrip} icon="add" onPress={() => router.push('/trip/new')} style={[styles.fab, { bottom: insets.bottom + 70 }]} />
     </View>
   );
 }

@@ -7,6 +7,7 @@ import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Icon } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import type { Photo } from '@/db/types';
+import { useT } from '@/i18n';
 
 type Props = {
   value: string;
@@ -29,6 +30,7 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, 
 
 // Chat input in one rounded box: text on top, attach and new-chat bottom left, voice and send bottom right
 export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached, onRemovePhoto, adding, onAttach, onNewChat, canNewChat, onSend, busy }: Props) {
+  const t = useT();
   const input = useRef<TextInput>(null);
   // Blur first: focusing an already focused field doesn't bring back a dismissed keyboard
   const showKeyboard = () => {
@@ -41,15 +43,15 @@ export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached
   if (voice.state === 'recording') {
     return (
       <View style={[styles.box, styles.recording]}>
-        <Pressable onPress={voice.cancel} style={styles.round} accessibilityRole="button" accessibilityLabel="取消录音">
+        <Pressable onPress={voice.cancel} style={styles.round} accessibilityRole="button" accessibilityLabel={t.buddy.cancelRecording}>
           <Icon name="close" size={18} duo={null} />
         </Pressable>
         <View style={styles.listening}>
           <View style={styles.redDot} />
-          <Text style={styles.listeningText}>正在听 {voice.seconds ? mmss(voice.seconds) : ''}</Text>
+          <Text style={styles.listeningText}>{t.buddy.listening} {voice.seconds ? mmss(voice.seconds) : ''}</Text>
           <Dots size={5} />
         </View>
-        <Pressable onPress={voice.finish} style={[styles.round, styles.primary]} accessibilityRole="button" accessibilityLabel="说完了，转成文字">
+        <Pressable onPress={voice.finish} style={[styles.round, styles.primary]} accessibilityRole="button" accessibilityLabel={t.buddy.finishRecording}>
           <Icon name="stop" size={18} color={Colors.onDark} duo={null} />
         </Pressable>
       </View>
@@ -63,7 +65,7 @@ export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached
           {attached.map((p) => (
             <View key={p.id}>
               <PhotoThumb file={p.file} style={styles.thumb} />
-              <Pressable onPress={() => onRemovePhoto(p.id)} style={styles.remove} hitSlop={8} accessibilityRole="button" accessibilityLabel="移除这张照片">
+              <Pressable onPress={() => onRemovePhoto(p.id)} style={styles.remove} hitSlop={8} accessibilityRole="button" accessibilityLabel={t.buddy.removePhoto}>
                 <Icon name="close" size={11} color={Colors.onDark} duo={null} />
               </Pressable>
             </View>
@@ -79,15 +81,15 @@ export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached
         ref={input}
         value={value}
         onChangeText={onChangeText}
-        placeholder={voice.state === 'transcribing' ? '正在把语音转成文字…' : attached.length ? '问问这张照片…' : '问点什么…'}
+        placeholder={voice.state === 'transcribing' ? t.buddy.transcribing : attached.length ? t.buddy.askPhoto : t.buddy.askAnything}
         autoFocus={autoFocus}
         placeholderTextColor={Colors.muted}
         style={styles.input}
         multiline
-        accessibilityLabel="向旅行搭子提问"
+        accessibilityLabel={t.buddy.inputA11y}
       />
       <View style={styles.toolbar}>
-        <Pressable onPress={onAttach} style={styles.round} accessibilityRole="button" accessibilityLabel="添加照片：拍照或从相册选">
+        <Pressable onPress={onAttach} style={styles.round} accessibilityRole="button" accessibilityLabel={t.buddy.attachA11y}>
           <Icon name="add" size={20} duo={null} />
         </Pressable>
         <Pressable
@@ -95,10 +97,10 @@ export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached
           disabled={!canNewChat}
           style={[styles.pill, !canNewChat && { opacity: 0.4 }]}
           accessibilityRole="button"
-          accessibilityLabel="开始新对话"
+          accessibilityLabel={t.buddy.newChatA11y}
           accessibilityState={{ disabled: !canNewChat }}>
           <Icon name="chat" size={15} duo={null} />
-          <Text style={styles.pillText}>新对话</Text>
+          <Text style={styles.pillText}>{t.buddy.newChat}</Text>
         </Pressable>
         <View style={{ flex: 1 }} />
         <Pressable
@@ -106,7 +108,7 @@ export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached
           disabled={voice.state !== 'idle'}
           style={styles.round}
           accessibilityRole="button"
-          accessibilityLabel="语音输入">
+          accessibilityLabel={t.buddy.voiceInput}>
           {voice.state === 'transcribing' ? <ActivityIndicator color={Colors.muted} /> : <Icon name="mic" size={20} duo={null} />}
         </Pressable>
         <Pressable
@@ -114,7 +116,7 @@ export function Composer({ value, onChangeText, onVoiceText, autoFocus, attached
           disabled={!canSend}
           style={[styles.round, styles.primary, !canSend && { opacity: 0.35 }]}
           accessibilityRole="button"
-          accessibilityLabel="发送"
+          accessibilityLabel={t.buddy.send}
           accessibilityState={{ disabled: !canSend }}>
           <Icon name="send" size={18} color={Colors.onDark} duo={null} />
         </Pressable>

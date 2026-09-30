@@ -9,33 +9,35 @@ import { describeError } from '@/ai/client';
 import { toast } from '@/components/common/Toast';
 import { Button, Card, Icon, type IconName } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
+import { getT, useT } from '@/i18n';
 import { saveSettings, type Settings } from '@/settings/settings';
 
 export type Status = { ok: boolean; text: string } | null;
 
 function openLink(url: string) {
-  Linking.openURL(url).catch(() => Alert.alert('打不开链接', url));
+  Linking.openURL(url).catch(() => Alert.alert(getT().form.cantOpenLink, url));
 }
 
 // Save flow shared by the settings sub-pages: toasts the outcome and guards leaving with unsaved edits.
 // save resolves to whether it worked, so a page can run follow-up steps only on success.
 export function useSettingsSave(dirty: boolean) {
+  const t = useT();
   const [saving, setSaving] = useState(false);
   useLeaveGuard(dirty && !saving);
-  const save = async (patch: Partial<Settings>, done = '已保存') => {
+  const save = async (patch: Partial<Settings>, done = t.common.saved) => {
     setSaving(true);
     try {
       await saveSettings(patch);
       toast(done);
       return true;
     } catch (e) {
-      toast(`保存失败：${describeError(e)}`, false);
+      toast(t.form.saveFailed(describeError(e)), false);
       return false;
     } finally {
       setSaving(false);
     }
   };
-  return { saving, save, label: saving ? '保存中' : dirty ? '保存' : '已保存' };
+  return { saving, save, label: saving ? t.common.saving : dirty ? t.common.save : t.common.saved };
 }
 
 // A settings sub-page: scrolling form with the page's actions pinned above the keyboard
@@ -55,10 +57,11 @@ export function SettingsPage({ children, footer }: { children: ReactNode; footer
 // Asks before going back with edits that were never saved
 function useLeaveGuard(dirty: boolean) {
   const navigation = useNavigation();
+  const t = useT();
   usePreventRemove(dirty, ({ data }) => {
-    Alert.alert('还没保存', '离开后这一页的修改会丢掉', [
-      { text: '继续编辑', style: 'cancel' },
-      { text: '不保存', style: 'destructive', onPress: () => navigation.dispatch(data.action) },
+    Alert.alert(t.form.unsavedTitle, t.form.unsavedText, [
+      { text: t.form.keepEditing, style: 'cancel' },
+      { text: t.form.discard, style: 'destructive', onPress: () => navigation.dispatch(data.action) },
     ]);
   });
 }
@@ -144,12 +147,13 @@ export function Field({ label, ...input }: { label: string } & ComponentProps<ty
 // Secret input with show/hide and a one-tap paste from the clipboard.
 // Masked only while not being edited: many Android phones switch password fields to a secure keyboard with no clipboard, which blocks pasting.
 export function KeyField({ label, value, onChangeText, placeholder, warning }: { label: string; value: string; onChangeText: (v: string) => void; placeholder: string; warning?: string | null }) {
+  const t = useT();
   const [shown, setShown] = useState(false);
   const [focused, setFocused] = useState(false);
   const paste = async () => {
     const text = (await Clipboard.getStringAsync()).trim();
     if (text) onChangeText(text);
-    else Alert.alert('剪贴板是空的', '先在网页上复制 API Key，再回来点「粘贴」');
+    else Alert.alert(t.form.clipboardEmpty, t.form.clipboardEmptyText);
   };
   return (
     <View style={styles.field}>
@@ -157,7 +161,7 @@ export function KeyField({ label, value, onChangeText, placeholder, warning }: {
         <Text style={styles.label}>{label}</Text>
         {value ? (
           <Text style={[styles.label, { color: Colors.teal }]} onPress={() => setShown((v) => !v)} suppressHighlighting>
-            {shown ? '隐藏' : '显示'}
+            {shown ? t.form.hide : t.form.show}
           </Text>
         ) : null}
       </View>
@@ -174,7 +178,7 @@ export function KeyField({ label, value, onChangeText, placeholder, warning }: {
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />
-        <Button compact kind="secondary" icon="copy" label="粘贴" onPress={paste} style={{ height: 46 }} />
+        <Button compact kind="secondary" icon="copy" label={t.form.paste} onPress={paste} style={{ height: 46 }} />
       </View>
       {warning ? <Text style={[styles.hint, { color: Colors.accent }]}>{warning}</Text> : null}
     </View>

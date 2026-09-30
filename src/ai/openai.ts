@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { getT, type Messages } from '@/i18n';
+
 // Minimal client for OpenAI-compatible /chat/completions endpoints (Volcengine Ark, DeepSeek, Qwen, …).
 // Only the widely supported subset is used: streaming, image_url / input_audio parts and function tools — no response_format,
 // since compatible servers disagree on it; JSON output is requested in the prompt and validated with zod instead.
@@ -66,7 +68,8 @@ export async function chatCompletion(cfg: OAConfig, req: Request, onText?: (text
     return await streamCompletion(cfg, req, abort.signal, onText);
   } catch (e) {
     if (!abort.signal.aborted) throw e;
-    throw new OpenAIError(null, `模型 ${req.model} 超过 ${Math.round(opts.timeoutMs! / 1000)} 秒没有返回完整结果，已中止`);
+    const secs = Math.round(opts.timeoutMs! / 1000);
+    throw new OpenAIError(null, getT().errors.timeout(req.model, secs));
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -106,7 +109,7 @@ async function streamCompletion(cfg: OAConfig, req: Request, signal: AbortSignal
 
   const out: Result = { text: '', toolCalls: [], finishReason: null };
   const apply = (c: Chunk) => {
-    if (c.error) throw new OpenAIError(null, c.error.message ?? '服务返回了错误');
+    if (c.error) throw new OpenAIError(null, c.error.message ?? getT().errors.serviceError);
     const choice = c.choices?.[0];
     if (!choice) return;
     // Servers that ignore stream:true answer with one complete message
@@ -154,8 +157,8 @@ async function streamCompletion(cfg: OAConfig, req: Request, signal: AbortSignal
   return out;
 }
 
-export function jsonInstruction(schema: z.ZodType) {
-  return `只输出一个 JSON 对象，不要输出任何其他文字，也不要用代码块包裹。JSON 必须符合这个 JSON Schema：\n${JSON.stringify(z.toJSONSchema(schema))}`;
+export function jsonInstruction(schema: z.ZodType, t: Messages) {
+  return t.ai.json(JSON.stringify(z.toJSONSchema(schema)));
 }
 
 // Pull the JSON object out of a reply that may carry <think> blocks or code fences
@@ -163,7 +166,7 @@ function readJSONReply<T>(schema: z.ZodType<T>, text: string): { data: T } | { p
   const s = stripThink(text);
   const start = s.indexOf('{');
   const end = s.lastIndexOf('}');
-  if (start < 0 || end < start) return { problem: '回复里没有 JSON 对象' };
+  if (start < 0 || end < start) return { problem: getT().errors.noJSON };
   let json: unknown;
   try {
     json = JSON.parse(s.slice(start, end + 1));
@@ -184,5 +187,5 @@ export function parseJSONReplyOrThrow<T>(schema: z.ZodType<T>, text: string): T 
   const r = readJSONReply(schema, text);
   if ('data' in r) return r.data;
   const head = text.trim().slice(0, 600);
-  throw new Error(`模型回复不是要求的 JSON：${r.problem}\n\n模型原文：${head || '（空）'}${text.trim().length > 600 ? '…' : ''}`);
+  throw new Error(getT().errors.badJSON(r.problem, head) + (text.trim().length > 600 ? '…' : ''));
 }

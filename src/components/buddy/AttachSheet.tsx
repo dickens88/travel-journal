@@ -5,6 +5,7 @@ import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Display, Icon, type IconName } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import type { Photo } from '@/db/types';
+import { useT } from '@/i18n';
 
 type Props = {
   visible: boolean;
@@ -32,19 +33,20 @@ function Action({ icon, label, hint, onPress }: { icon: IconName; label: string;
 // Bottom sheet behind the composer's "+": shoot a photo, pick from the phone's album, or reuse one from this trip
 export function AttachSheet({ visible, onClose, photos, selected, onToggle, onCamera, onLibrary }: Props) {
   const insets = useSafeAreaInsets();
+  const t = useT();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="关闭" />
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel={t.common.close} />
       <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
         <View style={styles.grabber} />
-        <Display variant="subheading">添加照片</Display>
+        <Display variant="subheading">{t.buddy.addPhotos}</Display>
         <View style={styles.actions}>
-          <Action icon="camera" label="拍照" hint="拍完加进这趟旅行" onPress={onCamera} />
-          <Action icon="photos" label="从相册选" hint="最多 4 张" onPress={onLibrary} />
+          <Action icon="camera" label={t.buddy.camera} hint={t.buddy.cameraHint} onPress={onCamera} />
+          <Action icon="photos" label={t.buddy.library} hint={t.buddy.libraryHint} onPress={onLibrary} />
         </View>
         {photos.length ? (
           <View style={{ gap: 8 }}>
-            <Text style={styles.section}>这趟旅行里的照片</Text>
+            <Text style={styles.section}>{t.buddy.tripPhotos}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {photos.map((p) => {
                 const on = selected.includes(p.id);
@@ -54,7 +56,7 @@ export function AttachSheet({ visible, onClose, photos, selected, onToggle, onCa
                     onPress={() => onToggle(p.id)}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: on }}
-                    accessibilityLabel={p.place_name ?? '旅行照片'}>
+                    accessibilityLabel={p.place_name ?? t.buddy.tripPhoto}>
                     <PhotoThumb file={p.file} style={[styles.thumb, on && styles.thumbOn]} />
                     {on ? (
                       <View style={styles.check}>

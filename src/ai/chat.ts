@@ -11,105 +11,84 @@ import { addChatMessage, addNote, getTrip, listDays, listNotes, listPhotos, list
 import type { ChatRow, Photo, Trip } from '@/db/types';
 import type { LatLng } from '@/geo/distance';
 import { describeFood, findPlace, searchNearbyFood, type FoodKeys } from '@/geo/nearbyFood';
+import { getT, type Messages } from '@/i18n';
 import { loadSettings } from '@/settings/settings';
 import { photoAnalysis, stopsFromPhotos } from '@/trip/derive';
 import { localParts } from '@/utils/time';
 
-// Default buddy persona; the user can replace it in Settings. The trip material is appended after it either way.
-export const BUDDY_PROMPT = `你是用户这趟旅行的「旅行搭子」，一个懂行、说话自然的中文旅伴。
-- 用户在手机上阅读，回答口语化、简洁，通常 3–6 句；需要列清单时用短列表，不用 markdown 标题。
-- 下面 <trip> 里是这趟旅行的素材（停留点、照片内容、随手记、天气），回答时优先结合它。用户发来的照片前会标注照片 id。
-- 涉及实时信息（天气预报、营业时间、交通、票价、活动）时使用 web_search，并说明信息来自搜索。
-- 用户想记录一句感受或经历时（例如「记一下……」「帮我记……」），调用 save_note 保存，然后用一句话确认。
-- 不确定的事实就直说不确定，不要编造店名、价格或时间。`;
-
-// OpenAI-compatible endpoints get no web search tool
-const NO_SEARCH = '当前没有联网搜索工具（附近餐厅仍可用 search_nearby_food 查）：涉及其他实时信息时直接说明查不到最新情况，建议用户出发前再核实。';
-
 const SaveNoteInput = z.object({ text: z.string().min(1), related_photo_id: z.string() });
 
-const SAVE_NOTE = {
+const saveNoteTool = (t: Messages['ai']['tools']) => ({
   name: 'save_note',
-  description: '把用户想记下来的一句话保存为这趟旅行的随手记。用户说「记一下」「帮我记」「记录」之类的话时调用。',
+  description: t.saveNote,
   input_schema: {
     type: 'object' as const,
     properties: {
-      text: { type: 'string', description: '要保存的内容，保留用户原话的意思，去掉「记一下」这类指令词' },
-      related_photo_id: {
-        type: 'string',
-        description: '如果能从时间、地点或内容判断这条记录对应哪张照片，填照片 id；判断不了填空字符串',
-      },
+      text: { type: 'string', description: t.saveNoteText },
+      related_photo_id: { type: 'string', description: t.saveNotePhoto },
     },
     required: ['text', 'related_photo_id'],
     additionalProperties: false,
   },
-};
+});
 
 const NearbyFoodInput = z.object({ keyword: z.string(), radius_m: z.number(), place: z.string(), in_mainland_china: z.boolean() });
 
+const NEARBY_FOOD = 'search_nearby_food';
+
 // Runs on the phone around where the user is: AMap in mainland China, Google Places abroad, OpenStreetMap as fallback
-const NEARBY_FOOD = {
-  name: 'search_nearby_food',
-  description:
-    '查附近的真实餐厅，返回评分、评价数、价位、距离、营业时间。默认以用户当前位置（或最近一张带定位的照片）为中心；' +
-    '用户说了自己在哪、或问的是别处时，把那个地点填进 place。' +
-    '用户问吃什么、找餐厅、推荐美食时先调用，推荐的店必须来自结果，并说出评分、距离等依据；结果没有评分时如实说明。',
+const nearbyFoodTool = (t: Messages['ai']['tools']) => ({
+  name: NEARBY_FOOD,
+  description: t.food,
   input_schema: {
     type: 'object' as const,
     properties: {
-      keyword: {
-        type: 'string',
-        description: '想吃的菜系或菜名，如「火锅」「小笼包」；在国外用英文或当地语言（如 pizza、tapas、ramen）效果更好；不限就填空字符串',
-      },
-      radius_m: { type: 'integer', description: '搜索半径（米），步行范围 1000，默认 1500，最大 5000' },
-      place: {
-        type: 'string',
-        description:
-          '以哪里为中心。用当地语言写，并用逗号带上城市，如「西湖, 杭州」「Oslo Sentralstasjon, Oslo」「渋谷駅, 東京」；外国地名不要写中文译名。查用户当前位置附近就填空字符串',
-      },
-      in_mainland_china: { type: 'boolean', description: 'place 是否在中国大陆；place 为空时填 false' },
+      keyword: { type: 'string', description: t.foodKeyword },
+      radius_m: { type: 'integer', description: t.foodRadius },
+      place: { type: 'string', description: t.foodPlace },
+      in_mainland_china: { type: 'boolean', description: t.foodChina },
     },
     required: ['keyword', 'radius_m', 'place', 'in_mainland_china'],
     additionalProperties: false,
   },
-};
+});
 
-const FUNCTIONS = [SAVE_NOTE, NEARBY_FOOD];
+// Tool descriptions are written in the reply language too
+const functions = (t: Messages) => [saveNoteTool(t.ai.tools), nearbyFoodTool(t.ai.tools)];
 
 // Haiku only has the basic web search tool
-const tools = (model: string): BetaToolUnion[] => [
+const tools = (model: string, t: Messages): BetaToolUnion[] => [
   model.includes('haiku') ? { type: 'web_search_20250305', name: 'web_search', max_uses: 3 } : { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
-  ...FUNCTIONS.map((t) => ({ ...t, strict: true, eager_input_streaming: true })),
+  ...functions(t).map((f) => ({ ...f, strict: true, eager_input_streaming: true })),
 ];
-const OA_TOOLS: OATool[] = FUNCTIONS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
+const oaTools = (t: Messages): OATool[] => functions(t).map((f) => ({ type: 'function', function: { name: f.name, description: f.description, parameters: f.input_schema } }));
 
-// Tells the model how to read the stamps below; appended after the (user-editable) persona
-const TIME_NOTE = '用户消息开头括号里是发送时间（用户手机当地时间），最新一条的时间就是「现在」。';
-// Also outside the persona, so a custom prompt still looks restaurants up instead of recalling them
-const FOOD_NOTE = '推荐附近吃的、找餐厅时，先用 search_nearby_food 查真实的店，再结合当地特色挑几家；不要凭记忆报店名。';
+// The default persona is t.ai.persona; the user can replace it in Settings. After the persona come notes that hold
+// whatever it says: how to read the send times (t.ai.timeNote), looking restaurants up instead of recalling them
+// (t.ai.foodNote), then the trip material and, last, the reply language (t.ai.replyLanguage).
 
 // Send time of a user message. Derived from the stored row so earlier turns render byte-identical every request —
 // a "current time" in the system prompt would change each minute and void the prompt cache for the whole history.
-function sentAt(r: ChatRow, blocks: StoredBlock[]): string | null {
+function sentAt(r: ChatRow, blocks: StoredBlock[], t: Messages): string | null {
   if (r.role !== 'user' || !blocks.some((b) => b.type === 'text' || b.type === 'trip_photo')) return null;
   const { date, hm } = localParts(r.created_at);
-  return `（${date} ${hm} 发送）`;
+  return t.ai.sentAt(date, hm);
 }
 
 // Stored rows -> API messages: expand trip photos to images, merge same-role neighbours
-async function toApiMessages(rows: ChatRow[], photoById: Map<string, Photo>, image: (file: string) => Promise<unknown>): Promise<BetaMessageParam[]> {
+async function toApiMessages(rows: ChatRow[], photoById: Map<string, Photo>, image: (file: string) => Promise<unknown>, t: Messages): Promise<BetaMessageParam[]> {
   const out: BetaMessageParam[] = [];
   for (const r of rows) {
     const blocks = blocksOf(r.content_json);
     const content: any[] = [];
     // Tool results are stored as their own rows, so a stamped row never has to lead with one
-    const stamp = sentAt(r, blocks);
+    const stamp = sentAt(r, blocks, t);
     if (stamp) content.push({ type: 'text', text: stamp });
     for (const b of blocks) {
       if (b.type === 'trip_photo') {
         const photo = photoById.get(b.photo_id);
         if (!photo) continue;
-        content.push({ type: 'text', text: `（照片 id=${photo.id}）` });
+        content.push({ type: 'text', text: t.ai.photoId(photo.id) });
         content.push(await image(photo.file));
       } else {
         content.push(b);
@@ -123,7 +102,7 @@ async function toApiMessages(rows: ChatRow[], photoById: Map<string, Photo>, ima
   return out;
 }
 
-function runSaveNote(tripId: string, input: unknown, photoById: Map<string, Photo>): string {
+function runSaveNote(tripId: string, input: unknown, photoById: Map<string, Photo>, t: Messages['ai']['tools']): string {
   const parsed = SaveNoteInput.safeParse(input);
   if (!parsed.success) return 'INVALID_INPUT';
   const photo = photoById.get(parsed.data.related_photo_id);
@@ -136,10 +115,10 @@ function runSaveNote(tripId: string, input: unknown, photoById: Map<string, Phot
     source: 'buddy',
     created_at: photo?.taken_at ?? Date.now(),
   });
-  return photo?.place_name ? `已保存，并关联到 ${photo.place_name}` : '已保存';
+  return photo?.place_name ? t.noteSavedAt(photo.place_name) : t.noteSaved;
 }
 
-async function runNearbyFood(input: unknown, spot: () => Promise<Spot | null>, keys: FoodKeys): Promise<string> {
+async function runNearbyFood(input: unknown, spot: () => Promise<Spot | null>, keys: FoodKeys, t: Messages['ai']['tools']): Promise<string> {
   const parsed = NearbyFoodInput.safeParse(input);
   if (!parsed.success) return 'INVALID_INPUT';
   const { keyword, radius_m, place, in_mainland_china } = parsed.data;
@@ -147,14 +126,15 @@ async function runNearbyFood(input: unknown, spot: () => Promise<Spot | null>, k
   let where: string;
   if (place.trim()) {
     const found = await findPlace(keys, place.trim(), in_mainland_china);
-    if (!found) return `没找到「${place}」这个地点，换个写法再查：用当地语言，带上城市`;
+    if (!found) return t.placeNotFound(place);
     at = found;
-    where = `${found.label}（按用户说的「${place}」查到的位置）`;
+    where = t.placeFound(found.label, place);
   } else {
     const here = await spot();
-    if (!here) return '拿不到用户的位置（定位不可用，照片也没有定位）。问用户现在在哪，拿到地名后填进 place 再查';
+    if (!here) return t.noPosition;
     at = here;
-    where = `${here.label || `${here.lat.toFixed(4)}, ${here.lng.toFixed(4)}`}${here.live ? '（用户当前位置）' : '（最近一张照片的位置）'}`;
+    const label = here.label || `${here.lat.toFixed(4)}, ${here.lng.toFixed(4)}`;
+    where = here.live ? t.currentPosition(label) : t.lastPhotoPosition(label);
   }
   return describeFood(await searchNearbyFood(keys, at, { keyword, radiusM: radius_m || undefined }), where);
 }
@@ -162,9 +142,9 @@ async function runNearbyFood(input: unknown, spot: () => Promise<Spot | null>, k
 // Stored rows -> OpenAI messages. Only text, trip photos and save_note calls carry over; Anthropic web search blocks are dropped.
 // Only the newest user message carries real images; earlier photos become text references, so a follow-up
 // question goes to the (tool-capable) text model instead of re-sending every image to the vision model
-async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, image: (file: string) => Promise<StoredBlock>): Promise<OAMessage[]> {
+async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, image: (file: string) => Promise<StoredBlock>, t: Messages): Promise<OAMessage[]> {
   const out: OAMessage[] = [];
-  const latestAsk = rows.findLast((r) => sentAt(r, blocksOf(r.content_json)) !== null);
+  const latestAsk = rows.findLast((r) => sentAt(r, blocksOf(r.content_json), t) !== null);
   for (const r of rows) {
     const blocks = blocksOf(r.content_json);
     const prev = out[out.length - 1];
@@ -188,7 +168,7 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
       }
     }
     const parts: OAContentPart[] = [];
-    const stamp = sentAt(r, blocks);
+    const stamp = sentAt(r, blocks, t);
     if (stamp) parts.push({ type: 'text', text: stamp });
     for (const b of blocks) {
       if (b.type === 'text') parts.push({ type: 'text', text: b.text });
@@ -196,10 +176,10 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
         const photo = photoById.get(b.photo_id);
         if (!photo) continue;
         if (r === latestAsk) {
-          parts.push({ type: 'text', text: `（照片 id=${photo.id}）` }, ...toOAParts([await image(photo.file)]));
+          parts.push({ type: 'text', text: t.ai.photoId(photo.id) }, ...toOAParts([await image(photo.file)]));
         } else {
           const seen = photoAnalysis(photo)?.caption;
-          parts.push({ type: 'text', text: `（之前发过的照片 id=${photo.id}${seen ? `：${seen}` : ''}）` });
+          parts.push({ type: 'text', text: t.ai.earlierPhoto(photo.id, seen) });
         }
       }
     }
@@ -212,14 +192,14 @@ async function toOAMessages(rows: ChatRow[], photoById: Map<string, Photo>, imag
 
 type Reply = { content: StoredBlock[]; pause: boolean };
 
-async function anthropicTurn({ client, model }: Extract<Backend, { kind: 'anthropic' }>, system: string, messages: BetaMessageParam[], onText: (text: string) => void): Promise<Reply> {
+async function anthropicTurn({ client, model }: Extract<Backend, { kind: 'anthropic' }>, system: string, messages: BetaMessageParam[], t: Messages, onText: (text: string) => void): Promise<Reply> {
   const stream = client.beta.messages.stream({
     ...claudeBase(model),
     max_tokens: 16000,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     // Second breakpoint on the last block: history (with its images) is re-sent every turn and read back at cache price
     cache_control: { type: 'ephemeral' },
-    tools: tools(model),
+    tools: tools(model, t),
     output_config: claudeEffort(model, 'medium'),
     messages,
   });
@@ -233,17 +213,17 @@ async function anthropicTurn({ client, model }: Extract<Backend, { kind: 'anthro
   return { content: msg.content as StoredBlock[], pause: msg.stop_reason === 'pause_turn' };
 }
 
-async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system: string, history: OAMessage[], onText: (text: string) => void): Promise<Reply> {
+async function openaiTurn(backend: Extract<Backend, { kind: 'openai' }>, system: string, history: OAMessage[], t: Messages, onText: (text: string) => void): Promise<Reply> {
   const seesImages = history.some((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
   const cfg = seesImages ? backend.visionCfg : backend.cfg;
   const req = {
     model: seesImages ? backend.visionModel : backend.model,
     max_tokens: 8000,
-    messages: [{ role: 'system' as const, content: `${system}\n${NO_SEARCH}` }, ...history],
+    messages: [{ role: 'system' as const, content: `${system}\n${t.ai.noSearch}` }, ...history],
   };
   let res;
   try {
-    res = await chatCompletion(cfg, { ...req, tools: OA_TOOLS }, onText);
+    res = await chatCompletion(cfg, { ...req, tools: oaTools(t) }, onText);
   } catch (e) {
     // Many hosted vision models can't call tools and reject the request outright; answer without save_note then
     if (!(e instanceof OpenAIError && e.status === 400)) throw e;
@@ -290,12 +270,14 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
     if (!images.has(file)) images.set(file, photoImageBlock(file));
     return images.get(file)!;
   };
-  const context = buildTripContext(trip, photos, stopsFromPhotos(photos), listDays(tripId), listNotes(tripId));
+  // Fixed for the whole answer, so a language switch mid-reply can't mix prompts
+  const t = getT();
+  const context = buildTripContext(trip, photos, stopsFromPhotos(photos), listDays(tripId), listNotes(tripId), t);
   const { buddyPrompt, tts, amapKey, googlePlacesKey } = await loadSettings();
   // Located once per answer, and only if the model asks for nearby food
   let spotting: Promise<Spot | null> | null = null;
   const spot = () => (spotting ??= resolveSpot(trip, photos));
-  const system = `${buddyPrompt.trim() || BUDDY_PROMPT}\n${TIME_NOTE}\n${FOOD_NOTE}\n\n<trip>\n${context}\n</trip>`;
+  const system = `${buddyPrompt.trim() || t.ai.persona}\n${t.ai.timeNote}\n${t.ai.foodNote}\n\n<trip>\n${context}\n</trip>\n\n${t.ai.replyLanguage}`;
 
   let answer = '';
   for (let turn = 0; turn < 6; turn++) {
@@ -304,8 +286,8 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
     const rows = listSession(tripId);
     const reply =
       backend.kind === 'openai'
-        ? await openaiTurn(backend, system, await toOAMessages(rows, photoById, image), onText)
-        : await anthropicTurn(backend, system, await toApiMessages(rows, photoById, image), onText);
+        ? await openaiTurn(backend, system, await toOAMessages(rows, photoById, image, t), t, onText)
+        : await anthropicTurn(backend, system, await toApiMessages(rows, photoById, image, t), t, onText);
     if (reply.content.length) addChatMessage(tripId, 'assistant', reply.content);
     answer = textOf(reply.content);
 
@@ -320,12 +302,12 @@ async function answerLatest(tripId: string, trip: Trip, backend: Backend, onText
         try {
           out =
             b.name === 'save_note'
-              ? runSaveNote(tripId, b.input, photoById)
-              : b.name === NEARBY_FOOD.name
-                ? await runNearbyFood(b.input, spot, { amap: amapKey, google: googlePlacesKey })
-                : `未知工具 ${b.name}`;
+              ? runSaveNote(tripId, b.input, photoById, t.ai.tools)
+              : b.name === NEARBY_FOOD
+                ? await runNearbyFood(b.input, spot, { amap: amapKey, google: googlePlacesKey }, t.ai.tools)
+                : t.ai.tools.unknownTool(b.name);
         } catch (e) {
-          out = `查询失败：${describeError(e)}`;
+          out = t.ai.tools.lookupFailed(describeError(e));
           failed = true;
         }
         return { type: 'tool_result', tool_use_id: b.id, content: out, is_error: failed || out === 'INVALID_INPUT' };

@@ -5,35 +5,39 @@ import { ErrorNotice } from '@/components/common/ErrorNotice';
 import { Button, Icon } from '@/components/common/ui';
 import { Colors, Fonts } from '@/constants/theme';
 import { generateJournal } from '@/ai/generateJournal';
+import { useT, type Messages } from '@/i18n';
 import { setJob, type TripJobs } from '@/trip/jobs';
 
 type Pending = { photos: number; notes: number; chats: number };
 
-function pendingText(p: Pending) {
-  const parts = [p.photos && `${p.photos} 张照片`, p.notes && `${p.notes} 条随手记`, p.chats && `${p.chats} 段对话`].filter(Boolean);
-  return parts.join('、');
+function pendingText(p: Pending, t: Messages) {
+  const c = t.journalCard;
+  const parts = [p.photos && c.pendingPhotos(p.photos), p.notes && c.pendingNotes(p.notes), p.chats && c.pendingChats(p.chats)].filter(Boolean);
+  return parts.join(t.common.listSep);
 }
 
 export function JournalStatusCard({ tripId, hasJournal, hasPhotos, pending, jobs }: { tripId: string; hasJournal: boolean; hasPhotos: boolean; pending: Pending; jobs: TripJobs }) {
-  const fresh = pendingText(pending);
+  const t = useT();
+  const c = t.journalCard;
+  const fresh = pendingText(pending, t);
   let title: string;
   let sub: string;
   let action: { label: string; run: () => void } | null = null;
   if (jobs.generating) {
-    title = hasJournal ? '正在更新游记…' : '正在写游记…';
-    sub = jobs.analyzing ? `先识别照片 ${jobs.analyzing.done}/${jobs.analyzing.total}` : '通常需要一两分钟，可以先做别的';
+    title = hasJournal ? c.updating : c.writing;
+    sub = jobs.analyzing ? c.analyzingFirst(jobs.analyzing.done, jobs.analyzing.total) : c.takesAWhile;
   } else if (!hasJournal) {
-    title = '还没有游记';
-    sub = hasPhotos ? '素材够了就可以生成，之后还能继续更新' : '先添加一些照片吧';
-    if (hasPhotos) action = { label: '生成游记', run: () => generateJournal(tripId) };
+    title = c.none;
+    sub = hasPhotos ? c.ready : c.addPhotosFirst;
+    if (hasPhotos) action = { label: c.generate, run: () => generateJournal(tripId) };
   } else if (fresh) {
-    title = '游记草稿';
-    sub = `还有 ${fresh}没写进去`;
-    action = { label: '更新游记', run: () => generateJournal(tripId) };
+    title = c.draft;
+    sub = c.notYetIn(fresh);
+    action = { label: c.update, run: () => generateJournal(tripId) };
   } else {
-    title = '游记已是最新';
-    sub = '继续添加照片或随手记，之后可以再更新';
-    action = { label: '查看', run: () => router.replace(`/trip/${tripId}/journal`) };
+    title = c.upToDate;
+    sub = c.keepAdding;
+    action = { label: c.view, run: () => router.replace(`/trip/${tripId}/journal`) };
   }
   return (
     <View style={{ gap: 8 }}>

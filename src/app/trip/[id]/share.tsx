@@ -15,11 +15,12 @@ import { formatTags } from '@/components/trip/JournalEdit';
 import { Colors } from '@/constants/theme';
 import { getJournal, getTrip, listPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
+import { getT, useT } from '@/i18n';
 import { deriveTrip } from '@/trip/derive';
 
 async function saveToAlbum(uris: string[]) {
   const { granted } = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
-  if (!granted) throw new Error('需要相册的写入权限');
+  if (!granted) throw new Error(getT().share.needWritePermission);
   for (const uri of uris) await MediaLibrary.saveToLibraryAsync(uri);
 }
 
@@ -27,6 +28,7 @@ export default function ShareScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
+  const t = useT();
   const trip = useQuery(`getTrip:${id}`, () => getTrip(id));
   const photos = useQuery(`listPhotos:${id}`, () => listPhotos(id));
   const journalRow = useQuery(`getJournal:${id}`, () => getJournal(id));
@@ -47,7 +49,7 @@ export default function ShareScreen() {
   if (!data || !journal) {
     return (
       <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center' }]}>
-        <Text style={{ color: Colors.muted }}>先生成游记，才能分享</Text>
+        <Text style={{ color: Colors.muted }}>{t.share.generateFirst}</Text>
       </View>
     );
   }
@@ -69,7 +71,7 @@ export default function ShareScreen() {
     try {
       await fn();
     } catch (e) {
-      Alert.alert('没能完成', describeError(e));
+      Alert.alert(t.share.failed, describeError(e));
     } finally {
       setBusy(false);
     }
@@ -79,30 +81,30 @@ export default function ShareScreen() {
     run(async () => {
       const uris = await captureAll();
       await saveToAlbum(uris);
-      Alert.alert('已保存到相册', mode === 'cards' ? `共 ${uris.length} 张，发小红书时按顺序选择即可` : undefined);
+      Alert.alert(t.share.savedToAlbum, mode === 'cards' ? t.share.cardsSaved(uris.length) : undefined);
     });
 
   const share = () =>
     run(async () => {
       if (mode === 'long') {
         const [uri] = await captureAll();
-        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: '分享游记长图' });
+        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: t.share.dialogTitle });
         return;
       }
       // The share sheet takes one file, so cards go through the album then Xiaohongshu
       const uris = await captureAll();
       await saveToAlbum(uris);
       await Clipboard.setStringAsync(caption);
-      Alert.alert('卡片已存入相册，文案已复制', '打开小红书发布笔记，选中刚保存的图片，粘贴文案即可。', [
-        { text: '稍后', style: 'cancel' },
-        { text: '打开小红书', onPress: () => Linking.openURL('xhsdiscover://').catch(() => Alert.alert('没有找到小红书 App')) },
+      Alert.alert(t.share.postedTitle, t.share.postedText, [
+        { text: t.common.later, style: 'cancel' },
+        { text: t.share.openXhs, onPress: () => Linking.openURL('xhsdiscover://').catch(() => Alert.alert(t.share.noXhs)) },
       ]);
     });
 
   return (
     <View style={styles.screen}>
       <Segmented
-        options={[{ value: 'long' as const, label: '长图' }, { value: 'cards' as const, label: '小红书卡片' }]}
+        options={[{ value: 'long' as const, label: t.share.long }, { value: 'cards' as const, label: t.share.cards }]}
         value={mode}
         onChange={setMode}
         style={{ margin: 20, marginTop: 8 }}
@@ -130,8 +132,8 @@ export default function ShareScreen() {
           <Text style={styles.pager}>{Math.min(page + 1, specs.length)} / {specs.length}</Text>
           <Card style={{ marginHorizontal: 20, gap: 6 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 13, color: Colors.muted }}>配套文案</Text>
-              <Button compact kind="secondary" icon="copy" label="复制文案" onPress={() => Clipboard.setStringAsync(caption).then(() => Alert.alert('已复制'))} />
+              <Text style={{ fontSize: 13, color: Colors.muted }}>{t.share.caption}</Text>
+              <Button compact kind="secondary" icon="copy" label={t.share.copyCaption} onPress={() => Clipboard.setStringAsync(caption).then(() => Alert.alert(t.common.copied))} />
             </View>
             <Display variant="subheading" style={{ fontSize: 16 }}>{journal.xhs.title}</Display>
             <Text style={{ fontSize: 13, lineHeight: 21, color: Colors.inkSoft }} numberOfLines={4}>{journal.xhs.body}</Text>
@@ -141,10 +143,10 @@ export default function ShareScreen() {
       )}
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Button kind="secondary" icon="download" label="保存到相册" onPress={save} disabled={busy} style={{ flex: 1 }} />
-          <Button icon="share" label={mode === 'long' ? '分享到…' : '发小红书'} onPress={share} loading={busy} style={{ flex: 1 }} />
+          <Button kind="secondary" icon="download" label={t.share.saveToAlbum} onPress={save} disabled={busy} style={{ flex: 1 }} />
+          <Button icon="share" label={mode === 'long' ? t.share.shareTo : t.share.postXhs} onPress={share} loading={busy} style={{ flex: 1 }} />
         </View>
-        <Text style={styles.hint}>{mode === 'long' ? '在系统分享面板里选择微信' : '图片存入相册、文案复制后跳转小红书'}</Text>
+        <Text style={styles.hint}>{mode === 'long' ? t.share.longHint : t.share.cardsHint}</Text>
       </View>
     </View>
   );

@@ -3,7 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { buddySkills, resolveSpot, skillPrompt, STORY_PROMPT, type BuddySkill } from '@/ai/buddySkills';
+import { buddySkills, resolveSpot, skillPrompt, type BuddySkill } from '@/ai/buddySkills';
 import { retryBuddyMessage, sendBuddyMessage } from '@/ai/chat';
 import { blocksOf, isToolResultTurn, isUserTurn, photoIdsOf, savedNoteTexts, textOf, usedWebSearch } from '@/ai/chatContent';
 import { describeError } from '@/ai/client';
@@ -21,15 +21,14 @@ import { Colors } from '@/constants/theme';
 import { getTrip, listNotes, listPhotos, listSession, startNewChat } from '@/db/repo';
 import type { ChatRow, Photo } from '@/db/types';
 import { useQuery } from '@/db/useQuery';
+import { useT } from '@/i18n';
 import { importAssets, pickPhotos, takePhoto, type ImportSource } from '@/photos/importPhotos';
 import { aiConfigured, saveSettings, useSettings, useSettingsReady } from '@/settings/settings';
-import { localParts } from '@/utils/time';
-
-// Sent on the user's behalf by the photo viewer's one-tap "让搭子讲讲"
-const DESCRIBE_PROMPT = '讲讲这张照片吧：拍的是哪里、画面里有什么，有什么值得知道的故事或看点？';
+import { formatDayTime, localParts } from '@/utils/time';
 
 // Memoized: the sheet re-renders on every streamed token
 const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map<string, Photo> }) {
+  const t = useT();
   const blocks = blocksOf(row.content_json);
   if (isToolResultTurn(blocks)) return null;
   const text = textOf(blocks);
@@ -47,15 +46,15 @@ const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map
   const notes = savedNoteTexts(blocks);
   return (
     <View style={{ alignSelf: 'flex-start', maxWidth: '88%', gap: 6 }}>
-      {usedWebSearch(blocks) ? <Chip tone="teal" icon="web" label="已联网搜索" /> : null}
+      {usedWebSearch(blocks) ? <Chip tone="teal" icon="web" label={t.buddy.searched} /> : null}
       {text ? (
         <>
           <View style={styles.botBubble}>
             <Markdown text={text} style={styles.botText} />
           </View>
-          <Pressable style={styles.speak} onPress={() => speak(text)} accessibilityLabel="朗读这条回复">
+          <Pressable style={styles.speak} onPress={() => speak(text)} accessibilityLabel={t.buddy.readReply}>
             <Icon name="speaker" size={13} color={Colors.muted} />
-            <Text style={{ fontSize: 12, color: Colors.muted }}>朗读</Text>
+            <Text style={{ fontSize: 12, color: Colors.muted }}>{t.buddy.read}</Text>
           </Pressable>
         </>
       ) : null}
@@ -63,7 +62,7 @@ const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map
         <View key={n} style={styles.noteSaved}>
           <Icon name="note" size={20} color={Colors.accent} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 13, fontWeight: '700' }}>已记为随手记</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700' }}>{t.buddy.savedAsNote}</Text>
             <Text style={{ fontSize: 12, color: Colors.muted }} numberOfLines={2}>{n}</Text>
           </View>
         </View>
@@ -73,11 +72,12 @@ const Bubble = memo(function Bubble({ row, photos }: { row: ChatRow; photos: Map
 });
 
 export default function BuddySheet() {
-  // photo: attach this trip photo; ask=describe: also send DESCRIBE_PROMPT right away
+  // photo: attach this trip photo; ask=describe: also send the photo viewer's one-tap "tell me about it" right away
   const { id, photo, ask } = useLocalSearchParams<{ id: string; photo?: string; ask?: string }>();
   const insets = useSafeAreaInsets();
   const settings = useSettings();
   const settingsReady = useSettingsReady();
+  const t = useT();
   const trip = useQuery(`getTrip:${id}`, () => getTrip(id));
   const rows = useQuery(`listSession:${id}`, () => listSession(id));
   const photos = useQuery(`listPhotos:${id}`, () => listPhotos(id));
@@ -100,7 +100,7 @@ export default function BuddySheet() {
   const scroll = useRef<ScrollView>(null);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const newestFirst = useMemo(() => [...photos].reverse(), [photos]);
-  const skills = useMemo(() => (trip ? buddySkills(trip, photos) : []), [trip, photos]);
+  const skills = useMemo(() => (trip ? buddySkills(trip, photos, t) : []), [trip, photos, t]);
   const ready = settingsReady && aiConfigured(settings);
   const busy = streaming !== null || locating;
   const canNewChat = !busy && rows.length > 0;
@@ -154,13 +154,13 @@ export default function BuddySheet() {
       const ids = await importAssets(id, sources);
       setAttached((a) => [...a, ...ids.filter((x) => !a.includes(x))]);
     } catch (e) {
-      Alert.alert('没能添加照片', describeError(e));
+      Alert.alert(t.buddy.addPhotoFailed, describeError(e));
     } finally {
       setAdding(false);
     }
   };
 
-  const tellStory = (p: Photo) => send(STORY_PROMPT, [p.id]);
+  const tellStory = (p: Photo) => send(t.skills.prompts.story, [p.id]);
 
   const runSkill = async (skill: BuddySkill) => {
     if (!trip || busy) return;
@@ -173,7 +173,7 @@ export default function BuddySheet() {
       setLocating(true);
       spot = await resolveSpot(trip, photos).finally(() => setLocating(false));
     }
-    send(skillPrompt(skill.id, { trip, photos, spot }), []);
+    send(skillPrompt(skill.id, { trip, photos, spot, t }), []);
   };
 
   useEffect(() => {
@@ -181,7 +181,7 @@ export default function BuddySheet() {
     autoAsked.current = true;
     // Clear the flag so a remount of this screen doesn't ask again
     router.setParams({ ask: undefined });
-    send(DESCRIBE_PROMPT);
+    send(t.skills.prompts.describe);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, photo, settingsReady]);
 
@@ -191,41 +191,41 @@ export default function BuddySheet() {
     let prevDay = '';
     for (const r of rows) {
       if (!isUserTurn(r)) continue;
-      const day = localParts(r.created_at);
-      if (day.date !== prevDay) out.set(r.id, `${day.date.slice(5).replace('-', '月')}日 ${day.hm}`);
-      prevDay = day.date;
+      const day = localParts(r.created_at).date;
+      if (day !== prevDay) out.set(r.id, formatDayTime(r.created_at, t));
+      prevDay = day;
     }
     return out;
-  }, [rows]);
+  }, [rows, t]);
 
   return (
     <KeyboardAvoidingView style={styles.sheet} behavior="padding">
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <BuddyAvatar value={settings.buddyAvatar} size={42} />
         <View style={{ flex: 1 }}>
-          <Display variant="subheading">旅行搭子</Display>
-          <Text style={styles.sub} numberOfLines={1}>保存在「{trip?.title}」</Text>
+          <Display variant="subheading">{t.buddy.title}</Display>
+          <Text style={styles.sub} numberOfLines={1}>{t.buddy.savedIn(trip?.title ?? '')}</Text>
         </View>
         <Pressable
           onPress={() => saveSettings({ tts: !settings.tts })}
-          accessibilityLabel={settings.tts ? '自动朗读：已开启' : '自动朗读：已关闭'}
+          accessibilityLabel={settings.tts ? t.buddy.autoReadOn : t.buddy.autoReadOff}
           style={styles.headerBtn}>
           <Icon name={settings.tts ? 'speaker' : 'speakerOff'} size={22} color={settings.tts ? Colors.accent : Colors.muted} duo={settings.tts ? Colors.pop : null} />
         </Pressable>
-        <Pressable onPress={() => router.back()} accessibilityLabel="收起" style={styles.headerBtn}>
+        <Pressable onPress={() => router.back()} accessibilityLabel={t.buddy.collapse} style={styles.headerBtn}>
           <Icon name="collapse" size={22} duo={null} />
         </Pressable>
       </View>
       <ScrollView ref={scroll} contentContainerStyle={styles.list} onContentSizeChange={() => !showGrid && scroll.current?.scrollToEnd({ animated: true })}>
         <View style={styles.context}>
           <Icon name="sparkle" size={14} color="#4A433B" />
-          <Text style={{ fontSize: 12, color: '#4A433B' }}>已了解 {photos.length} 张照片 · {noteCount} 条随手记</Text>
+          <Text style={{ fontSize: 12, color: '#4A433B' }}>{t.buddy.knows(photos.length, noteCount)}</Text>
         </View>
-        {trip?.chat_since && !rows.length ? <Text style={styles.day}>之前的对话已收起，写游记时仍会用上</Text> : null}
+        {trip?.chat_since && !rows.length ? <Text style={styles.day}>{t.buddy.earlierHidden}</Text> : null}
         {settingsReady && !aiConfigured(settings) ? (
           <View style={styles.noKey}>
-            <Text style={{ flex: 1, fontSize: 13 }}>还没有设置 AI 模型和 API Key，搭子暂时说不了话</Text>
-            <Button compact label="去设置" onPress={() => router.push('/settings')} />
+            <Text style={{ flex: 1, fontSize: 13 }}>{t.buddy.notSetUp}</Text>
+            <Button compact label={t.common.openSettings} onPress={() => router.push('/settings')} />
           </View>
         ) : null}
         {showGrid ? <SkillGrid skills={skills} photos={photos} onSkill={runSkill} onStory={tellStory} /> : null}
@@ -237,7 +237,7 @@ export default function BuddySheet() {
         ))}
         {locating || streaming === '' ? (
           <View style={[styles.botBubble, { alignSelf: 'flex-start' }]}>
-            <TypingDots label={locating ? '先看看你在哪儿…' : undefined} />
+            <TypingDots label={locating ? t.buddy.locating : undefined} />
           </View>
         ) : streaming ? (
           <View style={[styles.botBubble, { alignSelf: 'flex-start', maxWidth: '88%', gap: 8 }]}>
@@ -246,13 +246,13 @@ export default function BuddySheet() {
             <Dots size={5} />
           </View>
         ) : null}
-        {error && streaming === null ? <ErrorNotice title="搭子没能回复" message={error.message} onRetry={error.retry} onDismiss={() => setError(null)} /> : null}
+        {error && streaming === null ? <ErrorNotice title={t.buddy.replyFailed} message={error.message} onRetry={error.retry} onDismiss={() => setError(null)} /> : null}
       </ScrollView>
       {picking ? (
         <View style={styles.picker}>
           <View style={styles.pickHead}>
-            <Text style={styles.pickHint}>选一张照片，搭子给你讲讲它背后的故事</Text>
-            <Pressable onPress={() => setPicking(false)} hitSlop={10} accessibilityLabel="取消">
+            <Text style={styles.pickHint}>{t.buddy.pickHint}</Text>
+            <Pressable onPress={() => setPicking(false)} hitSlop={10} accessibilityLabel={t.common.cancel}>
               <Icon name="close" size={16} color={Colors.muted} duo={null} />
             </Pressable>
           </View>
@@ -262,7 +262,7 @@ export default function BuddySheet() {
                 <PhotoThumb file={p.file} style={styles.pickThumb} />
               </Pressable>
             ))}
-            {photos.length === 0 ? <Text style={styles.sub}>这趟旅行还没有照片</Text> : null}
+            {photos.length === 0 ? <Text style={styles.sub}>{t.buddy.noPhotos}</Text> : null}
           </ScrollView>
         </View>
       ) : showStrip ? (

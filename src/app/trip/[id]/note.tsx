@@ -5,11 +5,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Display, Icon } from '@/components/common/ui';
 import { Colors, Fonts } from '@/constants/theme';
+import { useT } from '@/i18n';
 import { addManualNote } from '@/trip/notes';
 
 export default function NoteSheet() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
+  const t = useT();
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -24,10 +26,10 @@ export default function NoteSheet() {
     <KeyboardAvoidingView behavior="padding" style={[styles.sheet, { paddingTop: insets.top + 12 }]}>
       <View style={styles.head}>
         <View style={{ flex: 1, gap: 4 }}>
-          <Display>随手记</Display>
-          <Text style={styles.hint}>会自动记下时间和当前位置，可以用输入法的语音输入</Text>
+          <Display>{t.note.title}</Display>
+          <Text style={styles.hint}>{t.note.hint}</Text>
         </View>
-        <Pressable onPress={() => router.back()} accessibilityLabel="关闭" hitSlop={10}>
+        <Pressable onPress={() => router.back()} accessibilityLabel={t.common.close} hitSlop={10}>
           <Icon name="close" size={24} duo={null} />
         </Pressable>
       </View>
@@ -36,11 +38,11 @@ export default function NoteSheet() {
         multiline
         value={text}
         onChangeText={setText}
-        placeholder="此刻想记下什么？"
+        placeholder={t.note.placeholder}
         placeholderTextColor={Colors.muted}
         style={styles.input}
       />
-      <Button label="保存" onPress={save} loading={saving} disabled={!text.trim()} />
+      <Button label={t.common.save} onPress={save} loading={saving} disabled={!text.trim()} />
     </KeyboardAvoidingView>
   );
 }

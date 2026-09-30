@@ -7,6 +7,7 @@ import { previewVoice } from '@/ai/speech';
 import { Button, Chip } from '@/components/common/ui';
 import { KeyField, Section, SettingsPage, StatusNote, styles as formStyles, Tip, useSettingsSave, type Status } from '@/components/settings/form';
 import { Colors } from '@/constants/theme';
+import { useT } from '@/i18n';
 import { saveSettings, useSettings, useSettingsReady } from '@/settings/settings';
 
 const SPEECH_KEYS_URL = 'https://console.volcengine.com/speech/new/setting/apikeys';
@@ -18,6 +19,7 @@ export default function VoiceSettings() {
 // Reading replies aloud: the phone's own voice by default, Doubao speech synthesis with an optional key
 function VoiceForm() {
   const settings = useSettings();
+  const t = useT();
   const [key, setKey] = useState(settings.ttsKey);
   const [voice, setVoice] = useState(settings.ttsVoice || DEFAULT_VOICE);
   const [previewing, setPreviewing] = useState(false);
@@ -29,8 +31,8 @@ function VoiceForm() {
     setPreviewing(true);
     setStatus(null);
     try {
-      await previewVoice('你好呀，我是你的旅行搭子。今天想去哪儿逛逛？', key, voice);
-      setStatus({ ok: true, text: '正在试听，听着合适就点「保存」' });
+      await previewVoice(t.voice.previewText, key, voice);
+      setStatus({ ok: true, text: t.voice.previewing });
     } catch (e) {
       setStatus({ ok: false, text: describeError(e) });
     } finally {
@@ -43,34 +45,34 @@ function VoiceForm() {
       footer={
         <>
           <Button kind="secondary" label={label} onPress={() => save({ ttsKey: key, ttsVoice: voice })} loading={saving} disabled={!dirty} style={{ flex: 1 }} />
-          <Button label="试听" icon="speaker" onPress={preview} loading={previewing} disabled={!key || saving} style={{ flex: 1 }} />
+          <Button label={t.voice.preview} icon="speaker" onPress={preview} loading={previewing} disabled={!key || saving} style={{ flex: 1 }} />
         </>
       }>
-      <Section note="随时可以在对话里关闭，每条回复下面也能单独点「朗读」">
+      <Section note={t.voice.autoNote}>
         <View style={formStyles.row}>
-          <Text style={{ flex: 1, fontSize: 15, color: Colors.ink }}>自动朗读搭子的回复</Text>
+          <Text style={{ flex: 1, fontSize: 15, color: Colors.ink }}>{t.voice.autoRead}</Text>
           <Switch value={settings.tts} onValueChange={(v) => saveSettings({ tts: v })} trackColor={{ true: Colors.accent }} thumbColor={Colors.card} />
         </View>
       </Section>
 
-      <Section title="声音">
+      <Section title={t.voice.sound}>
         <View style={[formStyles.row, { alignItems: 'flex-start' }]}>
-          <Text style={[formStyles.hint, { flex: 1 }]}>不填 Key 用手机自带的语音，免费也不用联网；填了改用豆包云端合成，声音更自然，按朗读的字数计费。</Text>
-          <Chip icon={key ? 'cloud' : 'speaker'} label={key ? '豆包云端' : '手机语音'} tone="teal" />
+          <Text style={[formStyles.hint, { flex: 1 }]}>{t.voice.soundHint}</Text>
+          <Chip icon={key ? 'cloud' : 'speaker'} label={key ? t.voice.doubaoCloud : t.voice.phoneVoice} tone="teal" />
         </View>
-        <KeyField label="豆包语音 API Key（填了就用云端）" value={key} onChangeText={setKey} placeholder="新版控制台的 API Key" />
+        <KeyField label={t.voice.keyLabel} value={key} onChangeText={setKey} placeholder={t.voice.keyPlaceholder} />
         {key ? (
           <>
-            <Text style={formStyles.label}>音色</Text>
+            <Text style={formStyles.label}>{t.voice.voiceLabel}</Text>
             <View style={styles.voices}>
-              {TTS_VOICES.map((v) => (
+              {TTS_VOICES.map((id) => (
                 <Pressable
-                  key={v.id}
-                  onPress={() => setVoice(v.id)}
-                  style={[styles.voice, voice === v.id && styles.voiceOn]}
+                  key={id}
+                  onPress={() => setVoice(id)}
+                  style={[styles.voice, voice === id && styles.voiceOn]}
                   accessibilityRole="radio"
-                  accessibilityState={{ checked: voice === v.id }}>
-                  <Text style={{ fontSize: 14, color: voice === v.id ? Colors.teal : Colors.ink }}>{v.label}</Text>
+                  accessibilityState={{ checked: voice === id }}>
+                  <Text style={{ fontSize: 14, color: voice === id ? Colors.teal : Colors.ink }}>{t.voice.voices[id]}</Text>
                 </Pressable>
               ))}
             </View>
@@ -79,8 +81,8 @@ function VoiceForm() {
       </Section>
       <StatusNote status={status} />
 
-      <Tip title="豆包语音怎么开通？" link={{ label: '去豆包语音控制台', url: SPEECH_KEYS_URL }}>
-        在豆包语音控制台开通「豆包语音合成模型 2.0」（资源 ID seed-tts-2.0），在新版控制台创建 API Key。回复出来后大约一秒开始读；没网或出错时自动换回手机语音。
+      <Tip title={t.voice.tipTitle} link={{ label: t.voice.tipLink, url: SPEECH_KEYS_URL }}>
+        {t.voice.tip}
       </Tip>
     </SettingsPage>
   );

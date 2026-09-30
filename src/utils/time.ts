@@ -1,3 +1,5 @@
+import type { Messages } from '@/i18n';
+
 // Local wall-clock parts of a UTC timestamp at a fixed offset (minutes east of UTC); defaults to the device zone
 export function localParts(ms: number, offsetMin = deviceOffsetMin(ms)) {
   const d = new Date(ms + offsetMin * 60_000);
@@ -11,13 +13,17 @@ export function deviceOffsetMin(ms: number) {
   return -new Date(ms).getTimezoneOffset();
 }
 
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-// "2025-11-12" -> "11月12日 周三"
-export function formatDayLabel(date: string) {
+// "2025-11-12" -> "11月12日 周三" / "Wed, Nov 12"
+export function formatDayLabel(date: string, t: Messages) {
   const [y, m, d] = date.split('-').map(Number);
-  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return `${m}月${d}日 ${WEEKDAYS[wd]}`;
+  return t.time.dayLabel(m, d, new Date(Date.UTC(y, m - 1, d)).getUTCDay());
+}
+
+// A timestamp in the device zone -> "11月12日 14:05" / "Nov 12 14:05"
+export function formatDayTime(ms: number, t: Messages) {
+  const { date, hm } = localParts(ms);
+  const [, m, d] = date.split('-').map(Number);
+  return t.time.dayTime(m, d, hm);
 }
 
 export function formatDateDots(date: string) {
@@ -38,6 +44,6 @@ export function tripDayNumber(start: string, date: string) {
 }
 
 // "2025.11.12 – 11.15", or "2025.11.12 起" while the trip is open
-export function formatTripRange(start: string, end: string | null) {
-  return end ? `${formatDateDots(start)} – ${formatDateDots(end).slice(5)}` : `${formatDateDots(start)} 起`;
+export function formatTripRange(start: string, end: string | null, t: Messages) {
+  return end ? `${formatDateDots(start)} – ${formatDateDots(end).slice(5)}` : t.time.since(formatDateDots(start));
 }

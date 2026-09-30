@@ -37,7 +37,7 @@ done
 # 3. scrcpy 显示窗口
 if ! pgrep -f "scrcpy -s $DEVICE" >/dev/null; then
   log "打开 scrcpy 窗口 ..."
-  (cd "$SCRCPY_DIR" && nohup ./scrcpy -s "$DEVICE" --window-title "旅迹 Android" \
+  (cd "$SCRCPY_DIR" && nohup ./scrcpy -s "$DEVICE" --window-title "走呗 Android" \
     --max-size 1280 --no-audio >"$HOME/Android/scrcpy.log" 2>&1 &)
 fi
 

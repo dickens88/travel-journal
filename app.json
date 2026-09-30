@@ -1,12 +1,15 @@
 {
   "expo": {
-    "name": "旅迹",
+    "name": "走呗",
     "slug": "travel-journal",
-    "version": "0.0.3",
+    "version": "0.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "traveljournal",
+    "scheme": "zoubee",
     "userInterfaceStyle": "light",
+    "locales": {
+      "en": "./languages/en.json"
+    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#F6F1E7",
@@ -55,15 +58,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "旅迹需要读取你选中的照片，用来识别拍摄时间、地点和内容。",
-          "cameraPermission": "旅迹需要使用相机，拍下照片发给旅行搭子并加进这趟旅行。"
+          "photosPermission": "走呗需要读取你选中的照片，用来识别拍摄时间、地点和内容。",
+          "cameraPermission": "走呗需要使用相机，拍下照片发给旅行搭子并加进这趟旅行。"
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "旅迹需要读取照片的拍摄地点，并把生成的游记图片保存到相册。",
-          "savePhotosPermission": "旅迹会把生成的游记长图和卡片保存到相册。",
+          "photosPermission": "走呗需要读取照片的拍摄地点，并把生成的游记图片保存到相册。",
+          "savePhotosPermission": "走呗会把生成的游记长图和卡片保存到相册。",
           "isAccessMediaLocationEnabled": true,
           "granularPermissions": [
             "photo"
@@ -79,7 +82,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "旅迹需要使用麦克风，把你对旅行搭子说的话转成文字。"
+          "microphonePermission": "走呗需要使用麦克风，把你对旅行搭子说的话转成文字。"
         }
       ],
       [
@@ -94,7 +97,8 @@
             "useLegacyPackaging": true
           }
         }
-      ]
+      ],
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,

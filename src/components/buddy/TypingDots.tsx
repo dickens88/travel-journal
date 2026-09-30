@@ -3,8 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 
 import { Colors } from '@/constants/theme';
-
-const PHRASES = ['想一想…', '翻翻你的照片和足迹…', '查查资料…', '组织一下语言…'];
+import { useT } from '@/i18n';
 
 function Dot({ delay, size }: { delay: number; size: number }) {
   const v = useSharedValue(0);
@@ -28,16 +27,17 @@ export function Dots({ size = 7 }: { size?: number }) {
 
 // Bouncing dots with a hint that changes every few seconds; pass `label` to pin one hint
 export function TypingDots({ label }: { label?: string }) {
+  const t = useT();
   const [n, setN] = useState(0);
   useEffect(() => {
     if (label) return;
-    const t = setInterval(() => setN((x) => (x + 1) % PHRASES.length), 2600);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setN((x) => x + 1), 2600);
+    return () => clearInterval(timer);
   }, [label]);
   return (
-    <View style={styles.row} accessibilityLabel="搭子正在回复" accessibilityLiveRegion="polite">
+    <View style={styles.row} accessibilityLabel={t.buddy.replying} accessibilityLiveRegion="polite">
       <Dots />
-      <Text style={styles.label}>{label ?? PHRASES[n]}</Text>
+      <Text style={styles.label}>{label ?? t.buddy.thinking[n % t.buddy.thinking.length]}</Text>
     </View>
   );
 }

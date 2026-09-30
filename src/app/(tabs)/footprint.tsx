@@ -6,27 +6,29 @@ import { LeafletMap } from '@/components/map/LeafletMap';
 import { Colors } from '@/constants/theme';
 import { countTrips, listAllLocatedPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
+import { useT } from '@/i18n';
 import { computeFootprint } from '@/stats/footprint';
 
 export default function FootprintScreen() {
   const insets = useSafeAreaInsets();
   const photos = useQuery('listAllLocatedPhotos', listAllLocatedPhotos);
   const tripCount = useQuery('countTrips', countTrips);
-  const f = computeFootprint(photos);
+  const t = useT();
+  const f = computeFootprint(photos, t.common.unknown);
   const byCountry = f.countries.map((c) => ({ country: c, regions: f.regions.filter((r) => r.country === c) }));
   const stats = [
-    { v: tripCount, l: '段旅程' },
-    { v: f.travelDays, l: '天在路上' },
-    { v: photos.length, l: '张照片' },
-    { v: f.cityCount, l: '座城市' },
+    { v: tripCount, l: t.footprint.trips },
+    { v: f.travelDays, l: t.footprint.days },
+    { v: photos.length, l: t.footprint.photos },
+    { v: f.cityCount, l: t.footprint.cities },
   ];
 
   return (
     <ScrollView style={{ backgroundColor: Colors.paper }} contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100, paddingHorizontal: 20, gap: 16 }}>
       <View>
-        <Display variant="hero" marker>足迹</Display>
+        <Display variant="hero" marker>{t.footprint.title}</Display>
         <Text style={styles.sub}>
-          {f.countries.length} 个国家 · {f.regions.length} 个省级地区 · {f.cityCount} 座城市
+          {t.footprint.summary(f.countries.length, f.regions.length, f.cityCount)}
         </Text>
       </View>
       <View style={styles.mapBox}>
@@ -38,7 +40,7 @@ export default function FootprintScreen() {
         ) : (
           <View style={styles.mapEmpty}>
             <Icon name="map" size={44} color={Colors.muted} />
-            <Text style={styles.sub}>添加带定位的照片后，去过的地方会出现在这里</Text>
+            <Text style={styles.sub}>{t.footprint.empty}</Text>
           </View>
         )}
       </View>
@@ -58,7 +60,7 @@ export default function FootprintScreen() {
               <Icon name="pin" size={18} color={Colors.accent} />
               <Text style={{ flex: 1, fontSize: 15, color: Colors.ink }}>
                 {r.region}
-                {r.cities.length ? ` · ${r.cities.join('、')}` : ''}
+                {r.cities.length ? ` · ${r.cities.join(t.common.listSep)}` : ''}
               </Text>
               <Text style={{ fontSize: 12, color: Colors.muted }}>{r.firstDate?.slice(0, 7).replace('-', '.')}</Text>
             </Card>

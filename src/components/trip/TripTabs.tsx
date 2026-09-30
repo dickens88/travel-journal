@@ -2,28 +2,30 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Fonts } from '@/constants/theme';
+import { useT } from '@/i18n';
 
 const TABS = [
-  { key: 'feed', label: '动态', path: '' },
-  { key: 'journal', label: '游记', path: '/journal' },
-  { key: 'map', label: '地图', path: '/map' },
+  { key: 'feed', path: '' },
+  { key: 'journal', path: '/journal' },
+  { key: 'map', path: '/map' },
 ] as const;
 
 export type TripTab = (typeof TABS)[number]['key'];
 
 export function TripTabs({ tripId, active }: { tripId: string; active: TripTab }) {
+  const t = useT();
   return (
     <View style={styles.row} accessibilityRole="tablist">
-      {TABS.map((t) => {
-        const on = t.key === active;
+      {TABS.map((tab) => {
+        const on = tab.key === active;
         return (
           <Pressable
-            key={t.key}
+            key={tab.key}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             style={[styles.tab, on && styles.tabOn]}
-            onPress={() => !on && router.replace(`/trip/${tripId}${t.path}`)}>
-            <Text style={[styles.label, on && styles.labelOn]}>{t.label}</Text>
+            onPress={() => !on && router.replace(`/trip/${tripId}${tab.path}`)}>
+            <Text style={[styles.label, on && styles.labelOn]}>{t.trip.tabs[tab.key]}</Text>
           </Pressable>
         );
       })}

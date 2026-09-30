@@ -1,7 +1,9 @@
 import type { ParsedExif } from './exif';
 import type { Photo } from '@/db/types';
+import { lightingText } from '@/geo/lighting';
+import type { Messages } from '@/i18n';
 import { photoAnalysis } from '@/trip/derive';
-import { localParts } from '@/utils/time';
+import { formatDateDots, localParts } from '@/utils/time';
 
 // "31.2304°N 121.4737°E"
 export function formatCoord(lat: number, lng: number) {
@@ -34,10 +36,10 @@ export function photoArea(p: Photo) {
 }
 
 // Where the photo was taken, for a one-line label; null when there's no position at all
-export function locationLabel(p: Photo) {
+export function locationLabel(p: Photo, t: Messages) {
   if (p.lat == null || p.lng == null) return null;
   const name = photoPlace(p) ?? photoArea(p) ?? formatCoord(p.lat, p.lng);
-  return p.loc_estimated ? `约 ${name}` : name;
+  return p.loc_estimated ? t.photo.about(name) : name;
 }
 
 function exposure(s: number) {
@@ -45,7 +47,7 @@ function exposure(s: number) {
 }
 
 // "60mm · 1/2336s · f/2 · ISO 50", focal length as its 35 mm equivalent when known
-export function cameraSummary(ex: ParsedExif) {
+export function cameraSummary(ex: ParsedExif, t: Messages) {
   const focal = ex.focal35 ?? ex.focalLength;
   return [
     focal ? `${Math.round(focal)}mm` : null,
@@ -53,7 +55,7 @@ export function cameraSummary(ex: ParsedExif) {
     ex.fNumber ? `f/${Math.round(ex.fNumber * 10) / 10}` : null,
     ex.iso ? `ISO ${Math.round(ex.iso)}` : null,
     ex.exposureBias ? `${ex.exposureBias > 0 ? '+' : ''}${Math.round(ex.exposureBias * 10) / 10} EV` : null,
-    ex.flash ? '闪光' : null,
+    ex.flash ? t.photo.flash : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -66,15 +68,16 @@ export function cameraName(ex: ParsedExif) {
   return `${ex.make} ${ex.model}`;
 }
 
-function focalDetail(ex: ParsedExif) {
-  if (!ex.focalLength) return ex.focal35 ? `等效 ${Math.round(ex.focal35)}mm` : null;
+function focalDetail(ex: ParsedExif, t: Messages) {
+  if (!ex.focalLength) return ex.focal35 ? t.photo.focal35(Math.round(ex.focal35)) : null;
   const real = `${Math.round(ex.focalLength * 100) / 100}mm`;
-  return ex.focal35 ? `${real}（等效 ${Math.round(ex.focal35)}mm）` : real;
+  return ex.focal35 ? t.photo.focalWith35(real, Math.round(ex.focal35)) : real;
 }
 
 export type Detail = { label: string; value: string };
 
-export function photoDetails(p: Photo): Detail[] {
+export function photoDetails(p: Photo, t: Messages): Detail[] {
+  const l = t.photo;
   const ex = photoExif(p);
   const a = photoAnalysis(p);
   const out: Detail[] = [];
@@ -82,27 +85,27 @@ export function photoDetails(p: Photo): Detail[] {
     if (value) out.push({ label, value });
   };
   if (p.taken_at != null) {
-    const t = localParts(p.taken_at, p.offset_min);
+    const d = localParts(p.taken_at, p.offset_min);
     const off = p.offset_min;
     const tz = `UTC${off >= 0 ? '+' : '-'}${Math.floor(Math.abs(off) / 60)}${Math.abs(off) % 60 ? `:${String(Math.abs(off) % 60).padStart(2, '0')}` : ''}`;
-    add('拍摄时间', `${t.date.replaceAll('-', '.')} ${t.hm}（${tz}）`);
+    add(l.takenAt, `${formatDateDots(d.date)} ${d.hm} (${tz})`);
   } else {
-    add('拍摄时间', '照片里没有记录');
+    add(l.takenAt, l.noTime);
   }
-  add('地点', photoPlace(p));
-  add('地区', [p.country ?? a?.country, p.region ?? a?.region, p.city ?? a?.city].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(' · '));
-  if (p.lat != null && p.lng != null) add('坐标', `${formatCoord(p.lat, p.lng)}${p.loc_estimated ? '（按前后照片推算）' : ''}`);
-  else add('坐标', '照片里没有位置信息');
+  add(l.place, photoPlace(p));
+  add(l.area, [p.country ?? a?.country, p.region ?? a?.region, p.city ?? a?.city].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(' · '));
+  if (p.lat != null && p.lng != null) add(l.coords, `${formatCoord(p.lat, p.lng)}${p.loc_estimated ? l.estimated : ''}`);
+  else add(l.coords, l.noCoords);
   // Cameras write 0 m when they had no GPS fix, so only trust altitude alongside a real position
-  if (p.altitude != null && p.lat != null && !p.loc_estimated) add('海拔', `${Math.round(p.altitude)} m`);
-  add('相机', cameraName(ex));
-  add('镜头', ex.lens);
-  add('焦距', focalDetail(ex));
-  add('参数', cameraSummary({ ...ex, focalLength: undefined, focal35: undefined }));
-  add('光线', p.lighting_tag || a?.light);
-  add('画面', a?.scene);
-  add('主体', a?.subjects?.join('、'));
-  add('氛围', a?.mood);
-  add('存档尺寸', p.width && p.height ? `${p.width} × ${p.height}` : null);
+  if (p.altitude != null && p.lat != null && !p.loc_estimated) add(l.altitude, `${Math.round(p.altitude)} m`);
+  add(l.camera, cameraName(ex));
+  add(l.lens, ex.lens);
+  add(l.focal, focalDetail(ex, t));
+  add(l.settings, cameraSummary({ ...ex, focalLength: undefined, focal35: undefined }, t));
+  add(l.light, p.lighting_tag ? lightingText(p.lighting_tag, t) : a?.light);
+  add(l.scene, a?.scene);
+  add(l.subjects, a?.subjects?.join(t.common.listSep));
+  add(l.mood, a?.mood);
+  add(l.size, p.width && p.height ? `${p.width} × ${p.height}` : null);
   return out;
 }

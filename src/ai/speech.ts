@@ -3,6 +3,7 @@ import type { File } from 'expo-file-system';
 import * as Speech from 'expo-speech';
 
 import { synthesize } from './cloudTts';
+import { getT } from '@/i18n';
 import { loadSettings } from '@/settings/settings';
 import { stripMarkdown } from '@/utils/markdown';
 
@@ -27,6 +28,9 @@ export function stopSpeaking() {
   Speech.stop();
   release();
 }
+
+// The phone's own voice, in the app's language
+const systemVoice = () => ({ language: getT().ai.speechLocale });
 
 // Once per reply rather than per clip; recording may have changed the mode since the last one
 const audibleInSilentMode = () => setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
@@ -78,7 +82,7 @@ export async function speak(text: string) {
   // Replies are markdown; don't read the symbols aloud
   const plain = stripMarkdown(text);
   const { ttsKey, ttsVoice } = await loadSettings();
-  if (!ttsKey) return Speech.speak(plain, { language: 'zh-CN' });
+  if (!ttsKey) return Speech.speak(plain, systemVoice());
 
   const parts = splitForSpeech(plain);
   let next: Promise<File> | null = parts.length ? synthesize(parts[0], ttsKey, ttsVoice) : null;
@@ -89,7 +93,7 @@ export async function speak(text: string) {
       file = await next;
     } catch (e) {
       console.warn('cloud tts failed, using the system voice', e);
-      if (mine === turn) Speech.speak(parts.slice(i).reduce(joinSentences), { language: 'zh-CN' });
+      if (mine === turn) Speech.speak(parts.slice(i).reduce(joinSentences), systemVoice());
       return;
     }
     if (mine !== turn) return file.delete();

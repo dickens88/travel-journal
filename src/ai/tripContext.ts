@@ -1,7 +1,8 @@
 import { blocksOf, isToolResultTurn, textOf } from './chatContent';
 import type { ChatRow, DayWeather, Note, Photo, Trip } from '@/db/types';
 import type { Stop } from '@/geo/cluster';
-import { TRANSPORT_LABEL } from '@/geo/transport';
+import { lightingText } from '@/geo/lighting';
+import type { Messages } from '@/i18n';
 import { photoAnalysis } from '@/trip/derive';
 import { localParts } from '@/utils/time';
 import { weatherLabel } from '@/weather/openMeteo';
@@ -16,46 +17,46 @@ export function photoPlace(p: Photo) {
   return [p.place_name, p.city].filter(Boolean).join('，');
 }
 
-export function buildTripContext(trip: Trip, photos: Photo[], stops: Stop[], days: DayWeather[], notes: Note[]) {
+export function buildTripContext(trip: Trip, photos: Photo[], stops: Stop[], days: DayWeather[], notes: Note[], t: Messages) {
+  const c = t.ai.context;
   const lines: string[] = [];
-  lines.push(`旅行名称：${trip.title}`);
-  lines.push(`日期：${trip.start_date} 起${trip.end_date ? `，${trip.end_date} 结束` : '，旅行还在进行中'}`);
+  lines.push(c.trip(trip.title));
+  lines.push(c.dates(trip.start_date, trip.end_date));
 
   if (days.length) {
-    lines.push('', '每日天气：');
-    for (const d of days) lines.push(`- ${d.date} ${weatherLabel(d.code).label} ${Math.round(d.tmax)}°/${Math.round(d.tmin)}°`);
+    lines.push('', c.weather);
+    for (const d of days) lines.push(`- ${d.date} ${weatherLabel(d.code, t).label} ${Math.round(d.tmax)}°/${Math.round(d.tmin)}°`);
   }
 
   if (stops.length) {
-    lines.push('', '停留点（按时间顺序，根据照片定位聚合）：');
+    lines.push('', c.stops);
     stops.forEach((s, i) => {
-      const next = s.toNext ? `；之后${TRANSPORT_LABEL[s.toNext.transport]} ${s.toNext.km.toFixed(1)} km 到下一站` : '';
-      const end = localParts(s.end, s.offsetMin).hm;
-      lines.push(`${i + 1}. ${fmtLocal(s.start, s.offsetMin)}–${end} ${s.placeName ?? '未知地点'}，${s.photoIds.length} 张照片${next}`);
+      const next = s.toNext ? c.toNext(t.transport[s.toNext.transport], s.toNext.km.toFixed(1)) : '';
+      const time = `${fmtLocal(s.start, s.offsetMin)}–${localParts(s.end, s.offsetMin).hm}`;
+      lines.push(c.stop(i + 1, time, s.placeName ?? t.common.unknownPlace, s.photoIds.length, next));
     });
   }
 
   if (photos.length) {
-    lines.push('', '照片（id｜当地时间｜地点｜光线｜内容）：');
+    lines.push('', c.photos);
     for (const p of photos) {
       const a = photoAnalysis(p);
-      const time = p.taken_at != null ? fmtLocal(p.taken_at, p.offset_min) : '时间未知';
-      const place = photoPlace(p) || '地点未知';
-      const content = a ? `${a.scene}；${a.caption}；氛围：${a.mood}；光线：${a.light}` : '尚未识别';
-      lines.push(`${p.id}｜${time}｜${place}${p.loc_estimated ? '（估算）' : ''}｜${p.lighting_tag || '-'}｜${content}`);
+      const time = p.taken_at != null ? fmtLocal(p.taken_at, p.offset_min) : c.timeUnknown;
+      const place = photoPlace(p) || c.placeUnknown;
+      const content = a ? c.analysis(a.scene ?? '', a.caption ?? '', a.mood ?? '', a.light ?? '') : c.notAnalyzed;
+      const light = p.lighting_tag ? lightingText(p.lighting_tag, t) : '-';
+      lines.push(`${p.id}｜${time}｜${place}${p.loc_estimated ? c.estimated : ''}｜${light}｜${content}`);
     }
   }
 
   if (notes.length) {
-    lines.push('', '随手记：');
-    for (const n of notes) {
-      lines.push(`- ${fmtLocal(n.created_at)}${n.place_name ? ` @${n.place_name}` : ''}：${n.text}`);
-    }
+    lines.push('', c.notes);
+    for (const n of notes) lines.push(c.note(fmtLocal(n.created_at), n.place_name, n.text));
   }
   return lines.join('\n');
 }
 
-export function buildChatTranscript(rows: ChatRow[]) {
+export function buildChatTranscript(rows: ChatRow[], t: Messages) {
   const lines: string[] = [];
   for (const r of rows) {
     const blocks = blocksOf(r.content_json);
@@ -63,8 +64,7 @@ export function buildChatTranscript(rows: ChatRow[]) {
     const text = textOf(blocks);
     if (!text) continue;
     const photo = blocks.find((b) => b.type === 'trip_photo');
-    const when = fmtLocal(r.created_at);
-    lines.push(`[${when}] ${r.role === 'user' ? '我' : '搭子'}${photo ? `（附照片 ${photo.photo_id}）` : ''}：${text}`);
+    lines.push(t.ai.context.chatLine(fmtLocal(r.created_at), r.role === 'user', photo?.photo_id ?? null, text));
   }
   return lines.join('\n');
 }

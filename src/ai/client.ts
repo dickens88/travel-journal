@@ -3,16 +3,17 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
 import type { OAConfig } from './openai';
 import { photoBase64, photoUri } from '@/photos/storage';
+import { getT } from '@/i18n';
 import { loadSettings } from '@/settings/settings';
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
-// Choices offered in settings; any other model ID can still be typed in
+// Choices offered in settings, each described by t.model.claudeNotes[id]; any other model ID can still be typed in
 export const CLAUDE_MODELS = [
-  { id: 'claude-opus-5-5', label: 'Opus 5.5', note: '推荐，效果和价格最均衡' },
-  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: '更快，价格约一半' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: '最快最便宜，游记质量一般' },
-  { id: 'claude-fable-5-1', label: 'Fable 5.1', note: '最强，价格约 Opus 的 2.5 倍' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1' },
 ];
 
 // Server-side fallback re-runs a declined request on Anthropic's recommended model; only the 5.x family accepts it
@@ -39,14 +40,14 @@ export async function getBackend(): Promise<Backend> {
   const s = await loadSettings();
   if (s.provider === 'openai') {
     if (!s.openaiKey || !s.openaiBaseURL.trim() || !s.openaiModel.trim()) {
-      throw new MissingKeyError('请先在「设置」里填写 OpenAI 兼容接口的 Base URL、API Key 和模型名');
+      throw new MissingKeyError(getT().errors.missingOpenAI);
     }
     const model = s.openaiModel.trim();
     const cfg = { apiKey: s.openaiKey, baseURL: s.openaiBaseURL };
     const visionCfg = s.openaiVisionBaseURL.trim() ? { ...cfg, baseURL: s.openaiVisionBaseURL } : cfg;
     return { kind: 'openai', cfg, model, visionCfg, visionModel: s.openaiVisionModel.trim() || model };
   }
-  if (!s.apiKey) throw new MissingKeyError('请先在「设置」里填写 Claude API Key');
+  if (!s.apiKey) throw new MissingKeyError(getT().errors.missingClaude);
   return {
     kind: 'anthropic',
     client: new Anthropic({ apiKey: s.apiKey, baseURL: s.baseURL.trim() || undefined, maxRetries: 2 }),
@@ -75,8 +76,8 @@ export function describeError(e: unknown): string {
 }
 
 export function assertUsable(stopReason: string | null) {
-  if (stopReason === 'refusal') throw new Error('这次请求被模型拒绝了，换个说法再试试');
-  if (stopReason === 'max_tokens') throw new Error('内容太长被截断了，请减少素材后重试');
+  if (stopReason === 'refusal') throw new Error(getT().errors.refusal);
+  if (stopReason === 'max_tokens') throw new Error(getT().errors.truncated);
 }
 
 // OpenAI finish_reason in Anthropic stop_reason terms

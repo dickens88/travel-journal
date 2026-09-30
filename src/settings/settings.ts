@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 
 import { db } from '@/db/db';
+import { applyLangPref, parseLangPref, type LangPref } from '@/i18n';
 import { createSignal } from '@/utils/signal';
 
 export type Provider = 'anthropic' | 'openai';
@@ -63,6 +64,10 @@ function readPref(key: string) {
   }
 }
 
+function writePref(key: string, value: string) {
+  db.runSync('INSERT INTO prefs (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
+}
+
 let current: Settings = {
   provider: 'anthropic',
   apiKey: '',
@@ -84,6 +89,18 @@ let current: Settings = {
 let loaded: Promise<void> | null = null;
 let ready = false;
 const changed = createSignal();
+
+// UI language lives apart from Settings: it is read synchronously at startup so the first frame is already in the right language
+const LANGUAGE = 'ui_language';
+
+export function loadLanguage() {
+  applyLangPref(parseLangPref(readPref(LANGUAGE)));
+}
+
+export function setLanguage(p: LangPref) {
+  writePref(LANGUAGE, p);
+  applyLangPref(p);
+}
 
 // Resolves to the latest values: saveSettings replaces `current`, so the first load's snapshot would go stale
 export async function loadSettings(): Promise<Settings> {
@@ -125,7 +142,7 @@ export async function saveSettings(patch: Partial<Settings>) {
       .map((k) => SecureStore.setItemAsync(SECURE[k], k === 'tts' ? (current.tts ? '1' : '0') : current[k])),
   );
   for (const k of touched.filter((k): k is keyof typeof PLAIN => k in PLAIN)) {
-    db.runSync('INSERT INTO prefs (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', PLAIN[k], current[k]);
+    writePref(PLAIN[k], current[k]);
   }
   changed.notify();
 }

@@ -11,6 +11,7 @@ import { Colors } from '@/constants/theme';
 import { getTrip, listPhotos } from '@/db/repo';
 import { useQuery } from '@/db/useQuery';
 import { importAssets, importLibrary, pickPhotos, requestLibraryAccess } from '@/photos/importPhotos';
+import { useT } from '@/i18n';
 import { todayISO } from '@/utils/time';
 
 const PAGE = 80;
@@ -22,6 +23,7 @@ export default function PickPhotosScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const t = useT();
   const trip = useQuery(`getTrip:${id}`, () => getTrip(id));
   const imported = useQuery(`importedAssets:${id}`, () => new Set(listPhotos(id).map((p) => p.asset_id).filter(Boolean)));
   const [access, setAccess] = useState<'all' | 'limited' | 'none' | null>(null);
@@ -57,7 +59,7 @@ export default function PickPhotosScreen() {
       .then((p) => {
         if (cancelled) return;
         setAccess(p.granted ? (p.accessPrivileges ?? 'all') : 'none');
-        if (p.granted) load(null).catch((e) => Alert.alert('读取相册失败', describeError(e)));
+        if (p.granted) load(null).catch((e) => Alert.alert(t.pick.readFailed, describeError(e)));
       });
     return () => {
       cancelled = true;
@@ -69,14 +71,14 @@ export default function PickPhotosScreen() {
     setSelected((s) => (s.includes(assetId) ? s.filter((x) => x !== assetId) : [...s, assetId]));
 
   const add = () => {
-    importLibrary(id, selected).catch((e) => Alert.alert('导入照片失败', describeError(e)));
+    importLibrary(id, selected).catch((e) => Alert.alert(t.errors.importFailed, describeError(e)));
     router.back();
   };
 
   const fromSystemPicker = async () => {
     const sources = await pickPhotos();
     if (!sources.length) return;
-    importAssets(id, sources).catch((e) => Alert.alert('导入照片失败', describeError(e)));
+    importAssets(id, sources).catch((e) => Alert.alert(t.errors.importFailed, describeError(e)));
     router.back();
   };
 
@@ -85,8 +87,8 @@ export default function PickPhotosScreen() {
   if (access === 'none') {
     return (
       <View style={[styles.screen, styles.center]}>
-        <Text style={styles.hint}>需要相册权限才能读取照片的拍摄时间和地点</Text>
-        <Button label="用系统相册选择" icon="photos" onPress={fromSystemPicker} />
+        <Text style={styles.hint}>{t.pick.needPermission}</Text>
+        <Button label={t.pick.systemPicker} icon="photos" onPress={fromSystemPicker} />
       </View>
     );
   }
@@ -94,18 +96,18 @@ export default function PickPhotosScreen() {
   return (
     <View style={styles.screen}>
       <Segmented
-        options={[{ value: true, label: '旅行期间' }, { value: false, label: '全部照片' }]}
+        options={[{ value: true, label: t.pick.duringTrip }, { value: false, label: t.pick.allPhotos }]}
         value={onlyTrip}
         onChange={setOnlyTrip}
         style={{ margin: 12 }}
       />
       {access === 'limited' ? (
         <View style={styles.limited}>
-          <Text style={{ flex: 1, fontSize: 13 }}>只能看到你允许的照片</Text>
+          <Text style={{ flex: 1, fontSize: 13 }}>{t.pick.limited}</Text>
           <Button
             compact
             kind="secondary"
-            label="选择更多"
+            label={t.pick.selectMore}
             onPress={() =>
               MediaLibrary.presentPermissionsPickerAsync(['photo'])
                 .then(() => load(null))
@@ -123,7 +125,7 @@ export default function PickPhotosScreen() {
         onEndReached={() => cursor && load(cursor)}
         onEndReachedThreshold={0.5}
         ListEmptyComponent={
-          access ? <Text style={[styles.hint, { marginTop: 60 }]}>{onlyTrip ? '旅行期间没有拍照片，试试「全部照片」' : '相册里没有照片'}</Text> : null
+          access ? <Text style={[styles.hint, { marginTop: 60 }]}>{onlyTrip ? t.pick.noneDuringTrip : t.pick.noPhotos}</Text> : null
         }
         renderItem={({ item }) => {
           const order = selected.indexOf(item.id);
@@ -137,7 +139,7 @@ export default function PickPhotosScreen() {
               <Image source={{ uri: item.uri }} style={StyleSheet.absoluteFill} contentFit="cover" recyclingKey={item.id} />
               {already ? (
                 <View style={styles.already}>
-                  <Text style={styles.alreadyText}>已添加</Text>
+                  <Text style={styles.alreadyText}>{t.pick.added}</Text>
                 </View>
               ) : null}
               <View style={[styles.check, order >= 0 && styles.checkOn]}>
@@ -150,9 +152,9 @@ export default function PickPhotosScreen() {
       <View style={[styles.bar, { paddingBottom: insets.bottom + 10 }]}>
         <Pressable onPress={fromSystemPicker} style={styles.system} accessibilityRole="button">
           <Icon name="photos" size={20} color={Colors.muted} />
-          <Text style={{ fontSize: 13, color: Colors.muted }}>系统相册</Text>
+          <Text style={{ fontSize: 13, color: Colors.muted }}>{t.pick.systemAlbum}</Text>
         </Pressable>
-        <Button label={selected.length ? `添加 ${selected.length} 张` : '选择照片'} onPress={add} disabled={!selected.length} style={{ flex: 1 }} />
+        <Button label={selected.length ? t.pick.add(selected.length) : t.pick.choose} onPress={add} disabled={!selected.length} style={{ flex: 1 }} />
       </View>
     </View>
   );

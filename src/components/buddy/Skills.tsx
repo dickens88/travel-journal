@@ -5,19 +5,21 @@ import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Display, Icon } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
 import type { Photo } from '@/db/types';
+import { useT } from '@/i18n';
 
 // Empty chat: the full menu of skills, plus recent photos that can be told as a story in one tap
 export function SkillGrid({ skills, photos, onSkill, onStory }: { skills: BuddySkill[]; photos: Photo[]; onSkill: (s: BuddySkill) => void; onStory: (p: Photo) => void }) {
+  const t = useT();
   const recent = photos.slice(-12).reverse();
   return (
     <View style={{ gap: 14 }}>
       <View style={{ gap: 2 }}>
-        <Display variant="subheading">想让我露一手？</Display>
-        <Text style={styles.sub}>点一下就开讲，也可以直接在下面问我</Text>
+        <Display variant="subheading">{t.buddy.showOff}</Display>
+        <Text style={styles.sub}>{t.buddy.showOffHint}</Text>
       </View>
       <View style={styles.grid}>
         {skills.map((s) => (
-          <Pressable key={s.id} onPress={() => onSkill(s)} style={({ pressed }) => [styles.card, pressed && { opacity: 0.6 }]} accessibilityRole="button" accessibilityLabel={`${s.title}：${s.hint}`}>
+          <Pressable key={s.id} onPress={() => onSkill(s)} style={({ pressed }) => [styles.card, pressed && { opacity: 0.6 }]} accessibilityRole="button" accessibilityLabel={`${s.title}: ${s.hint}`}>
             <Icon name={s.icon} size={26} color={Colors.ink} />
             <Text style={styles.cardTitle}>{s.title}</Text>
             <Text style={styles.sub} numberOfLines={1}>{s.hint}</Text>
@@ -26,10 +28,10 @@ export function SkillGrid({ skills, photos, onSkill, onStory }: { skills: BuddyS
       </View>
       {recent.length > 0 ? (
         <View style={{ gap: 8 }}>
-          <Text style={styles.section}>点张照片，听听它背后的故事</Text>
+          <Text style={styles.section}>{t.buddy.storyFromPhoto}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
             {recent.map((p) => (
-              <Pressable key={p.id} onPress={() => onStory(p)} accessibilityRole="button" accessibilityLabel={`讲讲${p.place_name ?? '这张照片'}的故事`}>
+              <Pressable key={p.id} onPress={() => onStory(p)} accessibilityRole="button" accessibilityLabel={t.buddy.storyA11y(p.place_name)}>
                 <PhotoThumb file={p.file} style={styles.storyThumb} />
                 {p.place_name ? <Text style={styles.storyLabel} numberOfLines={1}>{p.place_name}</Text> : null}
               </Pressable>
@@ -46,7 +48,7 @@ export function SkillStrip({ skills, onSkill }: { skills: BuddySkill[]; onSkill:
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip} contentContainerStyle={{ gap: 6, paddingHorizontal: 12, paddingVertical: 8 }} keyboardShouldPersistTaps="handled">
       {skills.map((s) => (
-        <Pressable key={s.id} onPress={() => onSkill(s)} style={({ pressed }) => [styles.pill, pressed && { opacity: 0.6 }]} accessibilityRole="button" accessibilityLabel={`${s.title}：${s.hint}`}>
+        <Pressable key={s.id} onPress={() => onSkill(s)} style={({ pressed }) => [styles.pill, pressed && { opacity: 0.6 }]} accessibilityRole="button" accessibilityLabel={`${s.title}: ${s.hint}`}>
           <Icon name={s.icon} size={16} color={Colors.ink} />
           <Text style={styles.pillText}>{s.title}</Text>
         </Pressable>

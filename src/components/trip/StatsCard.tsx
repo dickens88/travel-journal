@@ -2,23 +2,25 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { Card, Display } from '@/components/common/ui';
 import { Colors } from '@/constants/theme';
+import { useT, type Messages } from '@/i18n';
 import type { TripStats } from '@/stats/tripStats';
 
-export function statItems(s: TripStats) {
+export function statItems(s: TripStats, t: Messages) {
   return [
-    { value: String(s.days), unit: '天', label: '在路上' },
-    { value: String(s.cities), unit: '座', label: '城市' },
-    { value: String(s.km), unit: 'km', label: '总里程' },
-    { value: String(s.photos), unit: '张', label: '照片' },
-    { value: s.maxAltitude == null ? '-' : String(s.maxAltitude), unit: s.maxAltitude == null ? '' : 'm', label: '最高海拔' },
-    { value: s.earliest ?? '-', unit: '', label: '最早出发' },
+    { value: String(s.days), unit: t.stats.dayUnit(s.days), label: t.stats.days },
+    { value: String(s.cities), unit: t.stats.cityUnit(s.cities), label: t.stats.cities },
+    { value: String(s.km), unit: 'km', label: t.stats.distance },
+    { value: String(s.photos), unit: t.stats.photoUnit(s.photos), label: t.stats.photos },
+    { value: s.maxAltitude == null ? '-' : String(s.maxAltitude), unit: s.maxAltitude == null ? '' : 'm', label: t.stats.altitude },
+    { value: s.earliest ?? '-', unit: '', label: t.stats.earliest },
   ];
 }
 
 export function StatsCard({ stats }: { stats: TripStats }) {
+  const t = useT();
   return (
     <Card style={styles.grid}>
-      {statItems(stats).map((it) => (
+      {statItems(stats, t).map((it) => (
         <View key={it.label} style={styles.cell}>
           <Display style={styles.value}>
             {it.value}

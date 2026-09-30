@@ -9,15 +9,17 @@ import { statItems } from '@/components/trip/StatsCard';
 import { Colors, Fonts } from '@/constants/theme';
 import type { Photo, Trip } from '@/db/types';
 import type { Stop } from '@/geo/cluster';
+import { useT } from '@/i18n';
 import type { TripStats } from '@/stats/tripStats';
 import { formatDayLabel } from '@/utils/time';
 
 export type ShareData = { trip: Trip; journal: Journal; stats: TripStats; stops: Stop[]; photos: Map<string, Photo>; cover?: Photo };
 
 function StatGrid({ stats, cols = 3 }: { stats: TripStats; cols?: number }) {
+  const t = useT();
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 10 }}>
-      {statItems(stats).map((it) => (
+      {statItems(stats, t).map((it) => (
         <View key={it.label} style={{ width: `${100 / cols}%` }}>
           <Display variant="subheading" style={{ fontSize: 19 }}>
             {it.value}
@@ -32,13 +34,14 @@ function StatGrid({ stats, cols = 3 }: { stats: TripStats; cols?: number }) {
 
 export function LongImage({ data, width, ref }: { data: ShareData; width: number; ref: Ref<View> }) {
   const { trip, journal, stats, stops, photos, cover } = data;
+  const t = useT();
   return (
     <View ref={ref} collapsable={false} style={{ width, backgroundColor: Colors.paper }}>
       <View style={{ height: width * 0.78 }}>
         <PhotoThumb file={cover?.file} style={StyleSheet.absoluteFill} />
         <View style={styles.coverShade} />
         <View style={styles.coverText}>
-          <Text style={styles.brand}>旅迹 · 游记</Text>
+          <Text style={styles.brand}>{t.share.brand}</Text>
           <Display variant="title" style={{ color: Colors.onDark }}>{journal.title}</Display>
           <Text style={{ color: Colors.onDark, fontSize: 12 }}>{trip.title}</Text>
         </View>
@@ -53,7 +56,7 @@ export function LongImage({ data, width, ref }: { data: ShareData; width: number
         </View>
         {journal.days.map((day) => (
           <View key={day.date} style={{ gap: 12 }}>
-            <Display style={{ marginTop: 8 }}>{formatDayLabel(day.date)}</Display>
+            <Display style={{ marginTop: 8 }}>{formatDayLabel(day.date, t)}</Display>
             {day.sections.map((sec, i) => {
               const p = photos.get(sec.photo_ids[0]);
               return (
@@ -66,7 +69,7 @@ export function LongImage({ data, width, ref }: { data: ShareData; width: number
             })}
           </View>
         ))}
-        <Text style={styles.footer}>— 用「旅迹」记录 —</Text>
+        <Text style={styles.footer}>{t.share.footer}</Text>
       </View>
     </View>
   );
@@ -84,15 +87,16 @@ export function cardSpecs(journal: Journal): CardSpec[] {
 export function XhsCard({ data, spec, width, ref }: { data: ShareData; spec: CardSpec; width: number; ref: Ref<View> }) {
   const height = (width * 4) / 3;
   const { journal, stats, stops, photos, cover } = data;
+  const t = useT();
   if (spec.kind === 'cover') {
     return (
       <View ref={ref} collapsable={false} style={[styles.card, { width, height }]}>
         <PhotoThumb file={cover?.file} style={{ flex: 1 }} />
         <View style={{ padding: 16, gap: 6, backgroundColor: Colors.paper }}>
-          <Text style={styles.brandAccent}>旅迹 · 游记</Text>
+          <Text style={styles.brandAccent}>{t.share.brand}</Text>
           <Display variant="title" style={{ fontSize: 25, lineHeight: 33 }} numberOfLines={2}>{journal.xhs.title || journal.title}</Display>
           <Text style={{ fontSize: 11, color: Colors.muted }}>
-            {stats.days} 天 · {stats.photos} 张 · {stats.km} km
+            {[t.trips.days(stats.days), t.trips.photos(stats.photos), `${stats.km} km`].join(' · ')}
           </Text>
         </View>
       </View>
@@ -103,7 +107,7 @@ export function XhsCard({ data, spec, width, ref }: { data: ShareData; spec: Car
       <View ref={ref} collapsable={false} style={[styles.card, { width, height, backgroundColor: Colors.card }]}>
         <RouteSketch stops={stops} width={width} height={height * 0.58} />
         <View style={{ padding: 16, gap: 12 }}>
-          <Display variant="subheading">这趟旅程</Display>
+          <Display variant="subheading">{t.share.thisTrip}</Display>
           <StatGrid stats={stats} />
         </View>
       </View>
@@ -116,7 +120,7 @@ export function XhsCard({ data, spec, width, ref }: { data: ShareData; spec: Car
     <View ref={ref} collapsable={false} style={[styles.card, { width, height }]}>
       <PhotoThumb file={p?.file} style={{ height: height * 0.62 }} />
       <View style={{ flex: 1, padding: 16, gap: 6, backgroundColor: Colors.paper }}>
-        <Text style={styles.brandAccent}>{formatDayLabel(day.date)}</Text>
+        <Text style={styles.brandAccent}>{formatDayLabel(day.date, t)}</Text>
         <Display variant="subheading" style={{ fontSize: 16, lineHeight: 22 }} numberOfLines={1}>{sec.heading}</Display>
         <Serif style={{ fontSize: 13, lineHeight: 22 }} numberOfLines={5}>{sec.text}</Serif>
       </View>

@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { BUDDY_PROMPT } from '@/ai/chat';
 import { describeError } from '@/ai/client';
 import { AVATAR_PRESETS, BuddyAvatar } from '@/components/buddy/BuddyAvatar';
 import { toast } from '@/components/common/Toast';
 import { Button, Chip, Icon } from '@/components/common/ui';
 import { Section, SettingsPage, styles as formStyles, useSettingsSave } from '@/components/settings/form';
 import { Colors } from '@/constants/theme';
+import { LOCALES, useT } from '@/i18n';
 import { avatarPhotoFile, deleteAvatarPhoto, pickAvatarPhoto } from '@/settings/avatar';
 import { useSettings, useSettingsReady } from '@/settings/settings';
+
+// Every language's default counts as the default, so a prompt left alone never turns custom after a language switch
+const isDefaultPrompt = (text: string) => Object.values(LOCALES).some((m) => m.ai.persona === text);
 
 export default function BuddySettings() {
   return useSettingsReady() ? <BuddyForm /> : null;
@@ -18,13 +21,14 @@ export default function BuddySettings() {
 // Avatar and prompt are edited together and saved with one button
 function BuddyForm() {
   const settings = useSettings();
+  const t = useT();
   const [avatar, setAvatar] = useState(settings.buddyAvatar);
-  const [prompt, setPrompt] = useState(settings.buddyPrompt || BUDDY_PROMPT);
+  const [prompt, setPrompt] = useState(settings.buddyPrompt || t.ai.persona);
   const [uploading, setUploading] = useState(false);
   const photo = avatarPhotoFile(avatar);
 
   // The default prompt is stored as empty so later app updates to it still reach the user
-  const promptValue = prompt.trim() === BUDDY_PROMPT ? '' : prompt.trim();
+  const promptValue = isDefaultPrompt(prompt.trim()) ? '' : prompt.trim();
   const dirty = avatar !== settings.buddyAvatar || promptValue !== settings.buddyPrompt;
   const { saving, save: persist, label } = useSettingsSave(dirty);
 
@@ -45,20 +49,20 @@ function BuddyForm() {
       const value = await pickAvatarPhoto();
       if (value) choose(value);
     } catch (e) {
-      Alert.alert('头像没能换成', describeError(e));
+      Alert.alert(t.buddySettings.avatarFailed, describeError(e));
     } finally {
       setUploading(false);
     }
   };
 
   const save = async () => {
-    if (!prompt.trim()) return toast('提示词不能为空，可以点「恢复默认」', false);
+    if (!prompt.trim()) return toast(t.buddySettings.promptEmpty, false);
     const old = settings.buddyAvatar;
-    if (!(await persist({ buddyAvatar: avatar, buddyPrompt: promptValue }, '已保存，下一条消息开始生效'))) return;
+    if (!(await persist({ buddyAvatar: avatar, buddyPrompt: promptValue }, t.buddySettings.savedNextMessage))) return;
     unsaved.current = '';
     // Only one uploaded picture is kept; switching away from it removes the file
     if (old !== avatar) deleteAvatarPhoto(old);
-    setPrompt(promptValue || BUDDY_PROMPT);
+    setPrompt(promptValue || t.ai.persona);
   };
 
   return (
@@ -68,21 +72,21 @@ function BuddyForm() {
           <BuddyAvatar value={avatar} size={88} />
         </View>
         <View>
-          <Chip icon="buddy" label={promptValue ? '自定义性格' : '默认性格'} tone={promptValue ? 'teal' : 'plain'} />
+          <Chip icon="buddy" label={promptValue ? t.settings.customPersona : t.settings.defaultPersona} tone={promptValue ? 'teal' : 'plain'} />
         </View>
       </View>
 
-      <Section title="头像" note="挑一只小动物，或者上传一张自己喜欢的图">
+      <Section title={t.buddySettings.avatar} note={t.buddySettings.avatarNote}>
         <View style={styles.tiles}>
-          <AvatarTile on={!avatar} label="默认" onPress={() => choose('')}>
+          <AvatarTile on={!avatar} label={t.buddySettings.defaultAvatar} onPress={() => choose('')}>
             <BuddyAvatar value="" size={52} />
           </AvatarTile>
           {AVATAR_PRESETS.map((p) => (
-            <AvatarTile key={p.id} on={avatar === p.id} label={p.label} onPress={() => choose(p.id)}>
+            <AvatarTile key={p.id} on={avatar === p.id} label={t.buddySettings.animals[p.id] ?? p.id} onPress={() => choose(p.id)}>
               <BuddyAvatar value={p.id} size={52} />
             </AvatarTile>
           ))}
-          <AvatarTile on={!!photo} label={uploading ? '处理中…' : photo ? '换一张' : '上传'} onPress={() => !uploading && upload()}>
+          <AvatarTile on={!!photo} label={uploading ? t.buddySettings.processing : photo ? t.buddySettings.replace : t.buddySettings.upload} onPress={() => !uploading && upload()}>
             {photo ? (
               <BuddyAvatar value={avatar} size={52} />
             ) : (
@@ -94,12 +98,12 @@ function BuddyForm() {
         </View>
       </Section>
 
-      <Section title="性格" note="决定搭子的性格、语气和回答方式。旅行素材和当前时间会自动附在后面，记随手记的功能一直可用。">
+      <Section title={t.buddySettings.persona} note={t.buddySettings.personaNote}>
         <View style={formStyles.labelRow}>
-          <Text style={formStyles.label}>提示词</Text>
+          <Text style={formStyles.label}>{t.buddySettings.prompt}</Text>
           {promptValue ? (
-            <Text style={[formStyles.label, { color: Colors.teal }]} onPress={() => setPrompt(BUDDY_PROMPT)} suppressHighlighting>
-              恢复默认
+            <Text style={[formStyles.label, { color: Colors.teal }]} onPress={() => setPrompt(t.ai.persona)} suppressHighlighting>
+              {t.buddySettings.restoreDefault}
             </Text>
           ) : null}
         </View>

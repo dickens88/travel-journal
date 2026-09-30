@@ -6,6 +6,7 @@ import { PhotoThumb } from '@/components/common/PhotoThumb';
 import { Card, Display, Icon } from '@/components/common/ui';
 import { Colors, Fonts } from '@/constants/theme';
 import type { Photo } from '@/db/types';
+import { useT } from '@/i18n';
 
 // Multiline input styled as an editable block of journal text
 export function EditBox({ style, ...props }: TextInputProps) {
@@ -14,13 +15,14 @@ export function EditBox({ style, ...props }: TextInputProps) {
 
 // A section's photos while editing: small thumbnails, each with a button that takes it out of the section
 export function EditPhotos({ photos, onRemove }: { photos: Photo[]; onRemove: (id: string) => void }) {
+  const t = useT();
   if (!photos.length) return null;
   return (
     <View style={styles.thumbs}>
       {photos.map((p) => (
         <View key={p.id} style={styles.thumb}>
           <PhotoThumb file={p.file} style={StyleSheet.absoluteFill} />
-          <Pressable onPress={() => onRemove(p.id)} hitSlop={6} style={styles.remove} accessibilityRole="button" accessibilityLabel="从这一节移除照片">
+          <Pressable onPress={() => onRemove(p.id)} hitSlop={6} style={styles.remove} accessibilityRole="button" accessibilityLabel={t.journal.removePhoto}>
             <Icon name="close" size={12} color={Colors.onDark} duo={null} />
           </Pressable>
         </View>
@@ -42,20 +44,21 @@ function parseTags(text: string) {
 // The Xiaohongshu copy shown on the share page
 export function XhsEditor({ xhs, onChange }: { xhs: Journal['xhs']; onChange: (xhs: Journal['xhs']) => void }) {
   // Tags keep their own text so a trailing space or "#" can be typed before the next tag
+  const t = useT();
   const [tags, setTags] = useState(() => formatTags(xhs.tags));
   return (
     <Card style={{ gap: 10 }}>
-      <Display variant="subheading">小红书文案</Display>
-      <Text style={styles.label}>标题</Text>
+      <Display variant="subheading">{t.journal.xhs}</Display>
+      <Text style={styles.label}>{t.journal.xhsTitle}</Text>
       <EditBox value={xhs.title} onChangeText={(title) => onChange({ ...xhs, title })} multiline={false} style={styles.line} />
-      <Text style={styles.label}>正文</Text>
+      <Text style={styles.label}>{t.journal.xhsBody}</Text>
       <EditBox value={xhs.body} onChangeText={(body) => onChange({ ...xhs, body })} style={{ minHeight: 160 }} />
-      <Text style={styles.label}>标签（用空格分开）</Text>
+      <Text style={styles.label}>{t.journal.xhsTags}</Text>
       <EditBox
         value={tags}
-        onChangeText={(t) => {
-          setTags(t);
-          onChange({ ...xhs, tags: parseTags(t) });
+        onChangeText={(text) => {
+          setTags(text);
+          onChange({ ...xhs, tags: parseTags(text) });
         }}
         autoCapitalize="none"
         multiline={false}

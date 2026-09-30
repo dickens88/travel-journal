@@ -5,8 +5,9 @@ import { Alert } from 'react-native';
 
 import { describeError } from '@/ai/client';
 import { stopSpeaking } from '@/ai/speech';
-import { CLAUDE_CANT_HEAR, transcribe } from '@/ai/transcribe';
+import { transcribe } from '@/ai/transcribe';
 import { toast } from '@/components/common/Toast';
+import { useT } from '@/i18n';
 import { aiConfigured, loadSettings } from '@/settings/settings';
 import { speechLevel, toWav } from '@/utils/wav';
 
@@ -21,6 +22,7 @@ export type VoiceState = 'idle' | 'recording' | 'transcribing';
 // Tap to record, tap again to turn the speech into text; the text is handed back for the user to edit before sending.
 // Models that can't hear (Claude) hand over to the keyboard instead, whose own mic key does the dictation.
 export function useVoiceInput(onText: (text: string) => void, onUseKeyboard: () => void) {
+  const t = useT();
   const [state, setState] = useState<VoiceState>('idle');
   const [seconds, setSeconds] = useState(0);
   const chunks = useRef<ArrayBuffer[]>([]);
@@ -47,19 +49,19 @@ export function useVoiceInput(onText: (text: string) => void, onUseKeyboard: () 
     const settings = await loadSettings();
     if (settings.provider === 'anthropic') {
       onUseKeyboard();
-      toast(CLAUDE_CANT_HEAR);
+      toast(t.errors.claudeCantHear);
       return;
     }
     if (!aiConfigured(settings)) {
-      Alert.alert('还没有设置 AI', '语音转文字由设置里的模型完成，先填好火山方舟的 API Key 和模型', [
-        { text: '取消', style: 'cancel' },
-        { text: '去设置', onPress: () => router.push('/settings') },
+      Alert.alert(t.common.aiNotSetUp, t.buddy.voiceNeedsAI, [
+        { text: t.common.cancel, style: 'cancel' },
+        { text: t.common.openSettings, onPress: () => router.push('/settings') },
       ]);
       return;
     }
     const perm = await requestRecordingPermissionsAsync().catch(() => ({ granted: false }));
     if (!perm.granted) {
-      Alert.alert('没有麦克风权限', '在系统设置里允许旅迹使用麦克风后再试');
+      Alert.alert(t.buddy.noMic, t.buddy.noMicText);
       return;
     }
     stopSpeaking();
@@ -71,7 +73,7 @@ export function useVoiceInput(onText: (text: string) => void, onUseKeyboard: () 
       setState('recording');
     } catch (e) {
       release();
-      Alert.alert('没能开始录音', describeError(e));
+      Alert.alert(t.buddy.recordFailed, describeError(e));
     }
   };
 
@@ -94,7 +96,7 @@ export function useVoiceInput(onText: (text: string) => void, onUseKeyboard: () 
     // Nothing above background noise: don't send it, chat models tend to invent words for silence
     if (speechLevel(audio, format.current.sampleRate) < SILENCE_LEVEL) {
       setState('idle');
-      toast('没听到说话声，再试一次', false);
+      toast(t.buddy.heardNothing, false);
       return;
     }
     setState('transcribing');

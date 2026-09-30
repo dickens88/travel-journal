@@ -4,18 +4,16 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { matchAnalyses } from './analysisMatch';
 import { assertOAUsable, assertUsable, describeError, claudeBase, claudeEffort, getBackend, photoImageBlock, type Backend } from './client';
 import { chatCompletion, jsonInstruction, parseJSONReplyOrThrow, toOAParts } from './openai';
-import { PhotoAnalysisSchema, type PhotoAnalysis } from './schemas';
+import { photoAnalysisSchema, type PhotoAnalysis } from './schemas';
 import { fmtLocal, photoPlace } from './tripContext';
 import { listPhotos, updatePhotos, type PhotoPatch } from '@/db/repo';
+import { lightingText } from '@/geo/lighting';
+import { getT, type Messages } from '@/i18n';
 import { setJob } from '@/trip/jobs';
 
 const BATCH = 8;
 // Scenes, landmarks and captions read fine at 1024px; about 40% of the image tokens of the stored 1568px copy
 const ANALYZE_EDGE = 1024;
-
-const PROMPT = `以上是一次旅行中的照片，每张前面标了照片 id、当地拍摄时间、系统查到的地名（可能缺失）、GPS 坐标和根据太阳位置推算的光线。
-请逐张描述，用于之后写游记：场景（认得出的地标写出名称）、主体、氛围、光线、一句简短图注，以及是否适合当封面。
-只描述照片里看得到的内容，不确定的地标不要硬猜。所有字段用中文。`;
 
 // One photo's analysis is ~150 tokens of JSON; the cap keeps a model that never stops from running for minutes
 const TOKENS_PER_PHOTO = 600;
@@ -33,7 +31,8 @@ export function analyzePending(tripId: string) {
   return run;
 }
 
-async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], count: number): Promise<PhotoAnalysis[]> {
+async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], count: number, t: Messages): Promise<PhotoAnalysis[]> {
+  const schema = photoAnalysisSchema(t);
   if (backend.kind === 'openai') {
     const res = await chatCompletion(
       backend.visionCfg,
@@ -42,18 +41,18 @@ async function analyzeBatch(backend: Backend, content: BetaContentBlockParam[], 
         max_tokens: TOKENS_PER_PHOTO * count + 200,
         // Structured output: low temperature keeps vision models on the JSON instead of drifting into noise
         temperature: 0.2,
-        messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(PhotoAnalysisSchema) }] }],
+        messages: [{ role: 'user', content: [...toOAParts(content), { type: 'text', text: jsonInstruction(schema, t) }] }],
       },
       undefined,
       { timeoutMs: TIMEOUT_MS },
     );
     assertOAUsable(res.finishReason);
-    return parseJSONReplyOrThrow(PhotoAnalysisSchema, res.text).photos;
+    return parseJSONReplyOrThrow(schema, res.text).photos;
   }
   const res = await backend.client.beta.messages.parse({
     ...claudeBase(backend.model),
     max_tokens: 8000,
-    output_config: { ...claudeEffort(backend.model, 'medium'), format: betaZodOutputFormat(PhotoAnalysisSchema) },
+    output_config: { ...claudeEffort(backend.model, 'medium'), format: betaZodOutputFormat(schema) },
     messages: [{ role: 'user', content }],
   });
   assertUsable(res.stop_reason);
@@ -67,17 +66,20 @@ async function doAnalyze(tripId: string) {
   setJob(tripId, { analyzing: { done, total: pending.length }, error: undefined });
   try {
     const backend = await getBackend();
+    const t = getT();
+    const d = t.ai.analyze;
     for (let i = 0; i < pending.length; i += BATCH) {
       const batch = pending.slice(i, i + BATCH);
       const images = await Promise.all(batch.map((p) => photoImageBlock(p.file, { width: p.width, height: p.height, maxEdge: ANALYZE_EDGE })));
       const content: BetaContentBlockParam[] = batch.flatMap((p, j) => {
-        const time = p.taken_at != null ? fmtLocal(p.taken_at, p.offset_min) : '时间未知';
-        const place = photoPlace(p) || '地名未知';
-        const at = p.lat != null && p.lng != null ? `坐标 ${p.lat.toFixed(4)},${p.lng.toFixed(4)}${p.loc_estimated ? '（按时间估算）' : ''}` : '无坐标';
-        return [{ type: 'text' as const, text: `照片 id=${p.id}｜${time}｜${place}｜${at}｜${p.lighting_tag || '光线未知'}` }, images[j]];
+        const time = p.taken_at != null ? fmtLocal(p.taken_at, p.offset_min) : t.ai.context.timeUnknown;
+        const place = photoPlace(p) || t.ai.context.placeUnknown;
+        const at = p.lat != null && p.lng != null ? d.coords(`${p.lat.toFixed(4)},${p.lng.toFixed(4)}`, !!p.loc_estimated) : d.noCoords;
+        const light = p.lighting_tag ? lightingText(p.lighting_tag, t) : d.lightUnknown;
+        return [{ type: 'text' as const, text: d.photo(p.id, time, place, at, light) }, images[j]];
       });
-      content.push({ type: 'text', text: PROMPT });
-      const photos = await analyzeBatch(backend, content, batch.length);
+      content.push({ type: 'text', text: d.prompt });
+      const photos = await analyzeBatch(backend, content, batch.length, t);
       const patches: PhotoPatch[] = [];
       for (const [p, a] of matchAnalyses(batch, photos)) {
         // Android phones without Google services often can't reverse-geocode; fall back to the model's reading
@@ -96,7 +98,7 @@ async function doAnalyze(tripId: string) {
       setJob(tripId, { analyzing: { done, total: pending.length } });
     }
   } catch (e) {
-    setJob(tripId, { error: { title: '照片识别失败', message: describeError(e), retry: () => analyzePending(tripId) } });
+    setJob(tripId, { error: { title: getT().errors.photoRecognitionFailed, message: describeError(e), retry: () => analyzePending(tripId) } });
   } finally {
     setJob(tripId, { analyzing: undefined });
   }

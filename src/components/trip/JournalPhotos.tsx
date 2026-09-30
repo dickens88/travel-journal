@@ -2,14 +2,16 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { PhotoThumb } from '@/components/common/PhotoThumb';
 import type { Photo } from '@/db/types';
+import { lightingText } from '@/geo/lighting';
+import { useT, type Messages } from '@/i18n';
 import { photoAnalysis } from '@/trip/derive';
 
-function caption(p: Photo) {
-  return [p.lighting_tag, photoAnalysis(p)?.caption].filter(Boolean).join(' · ');
+function caption(p: Photo, t: Messages) {
+  return [p.lighting_tag && lightingText(p.lighting_tag, t), photoAnalysis(p)?.caption].filter(Boolean).join(' · ');
 }
 
 function Figure({ photo, height, flex }: { photo: Photo; height: number; flex?: boolean }) {
-  const text = caption(photo);
+  const text = caption(photo, useT());
   return (
     <View style={[{ height, borderRadius: 14, overflow: 'hidden' }, flex && { flex: 1 }]}>
       <PhotoThumb file={photo.file} style={StyleSheet.absoluteFill} />
